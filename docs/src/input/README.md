@@ -1,6 +1,6 @@
 # Input
 
-TODO: Write overview of the Spectrum's input system — the keyboard matrix scanned via the ULA, the 128K dedicated keypad, the Kempston and Sinclair joystick interfaces, and the quirks that arise from the matrix design.
+The Spectrum reads input through the ULA's keyboard matrix scanning mechanism. Later models add a dedicated keypad. External joystick interfaces (Kempston, Sinclair, Cursor, Fuller, etc.) are accessed through additional I/O ports — see [Joystick Interfaces](../peripherals/joysticks.md).
 
 ## Subsections
 

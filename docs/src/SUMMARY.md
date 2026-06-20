@@ -66,7 +66,14 @@
   - [The I Register Snow Bug](./quirks/i_register_snow.md)
   - [EAR/MIC Circuit Delays](./quirks/ear_mic_delays.md)
   - [Model Detection](./quirks/model_detection.md)
-  - [ZX Interface I](./quirks/zx_interface1.md)
+  - [ZX Interface I & II](./quirks/zx_interface1.md)
+
+# Peripherals
+
+- [Printers](./peripherals/printers.md)
+- [Mass Storage](./peripherals/mass_storage.md)
+- [Joystick Interfaces](./peripherals/joysticks.md)
+- [Other Peripherals](./peripherals/misc.md)
 
 # Appendix
 
