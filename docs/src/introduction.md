@@ -4,9 +4,25 @@ Welcome to the ZX Spectrum Hardware Documentation. The documentation is scattere
 
 ### Why the Spectrum?
 
-The Sinclair ZX Spectrum is a fascinating machine to emulate. Released in 1982, the Spectrum relies on absolute minimalism. 
+The ZX Spectrum is a fascinating family of machines to emulate. Released in 1982, the original Spectrum relies on absolute minimalism. There is no graphics chip. There is no sound chip. There is barely an I/O controller. The machine is essentially a Z80 CPU, a block of RAM, and a custom gate array called the ULA that sneaks reads from the RAM behind the CPU's back to generate a video signal.
 
-There is no graphics chip. There is no sound chip. There is barely an I/O controller. The machine is essentially a Z80 CPU, a block of RAM, and a custom gate array called the ULA that sneaks reads from the RAM behind the CPU's back to generate a video signal. This minimalist design leads to a machine that is incredibly simple in theory, but rife with quirks, timing dependencies, and "clever" software hacks in practice.
+This minimalist core remained at the heart of the family even as later models added memory paging, a dedicated sound chip, floppy disk interfaces, and other enhancements. Across every model, the tight coupling between the CPU and video hardware remains the defining challenge of accurate emulation.
+
+### Models Covered
+
+This book covers the following ZX Spectrum models:
+
+| Model | Year | Manufacturer | Key Differences |
+|---|---|---|---|
+| 16K | 1982 | Sinclair | Original, 16 KB RAM, 16 KB ROM |
+| 48K | 1982 | Sinclair | 48 KB RAM, identical otherwise |
+| Spectrum+ | 1984 | Sinclair | 48K internals, new keyboard case |
+| 128K | 1985 | Sinclair (Iberian) | 128 KB RAM, AY-3-8912 sound, keypad, new ROM |
+| +2 | 1986 | Amstrad | 128K hardware, grey case, built-in tape deck |
+| +3 | 1987 | Amstrad | 128K with 3" floppy drive, CP/M support, WD1770 FDC |
+| +2A/+2B | 1987–88 | Amstrad | +3 motherboard in +2 case, no disk drive |
+
+Where a feature is model-specific, it is explicitly called out. Sections that do not specify a model describe the baseline behaviour shared across the entire family.
 
 ### Scope of this Book
 

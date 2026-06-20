@@ -6,12 +6,19 @@ To emulate the Spectrum accurately, you must understand the tight coupling betwe
 
 ## The Core Components
 
-The 48K Spectrum consists of only four active components from an emulation standpoint:
+The original 48K Spectrum consists of only four active components from an emulation standpoint. Later models extend this base with additional chips, but the core remains the same:
 
 1. **The Z80A CPU**: The brain. Running at exactly 3.5 MHz (3,500,000 Hz), it executes instructions, handles interrupts, and drives all I/O.
-2. **The 16K ROM**: A mask ROM containing the Sinclair BASIC interpreter and core I/O routines. It occupies the lowest address space (`0x0000 - 0x3FFF`).
-3. **The 48K RAM**: Dynamic RAM occupying `0x4000 - 0xFFFF`. Crucially, the lower 16K of this RAM (`0x4000 - 0x7FFF`) is shared with the video hardware.
+2. **The 16K ROM**: A mask ROM containing the Sinclair BASIC interpreter and core I/O routines. It occupies the lowest address space (`0x0000 - 0x3FFF`). Later models may page in alternative ROM banks.
+3. **The RAM**: 48K of dynamic RAM on original models (`0x4000 - 0xFFFF`), expanded to 128K on later models via bank switching. The lower 16K (`0x4000 - 0x7FFF`) is always shared with the video hardware.
 4. **The ULA (Uncommitted Logic Array)**: The custom silicon that generates the video signal, reads the keyboard, outputs tape audio, and triggers interrupts. It is *not* a programmable GPU; it is a hardwired state machine.
+
+### Additional Components in Later Models
+
+| Model | Added Components |
+|---|---|
+| 128K | AY-3-8912 sound chip, 128K RAM paging controller, keypad |
+| +3 | WD1770 floppy disk controller, +3-specific ROM, additional paging port |
 
 ## The Bus and "Contention"
 
@@ -24,9 +31,11 @@ The ULA must constantly read from the lower 16K of RAM to figure out what pixels
 
 This means the Z80 runs slightly slower when executing code or reading data from the lower 16K of RAM during the active screen drawing period. This phenomenon is called *contended memory*, and emulating it accurately is the #1 challenge of Spectrum emulation. Games relied on these exact slowdowns to time their routines.
 
+On 128K models, the contention pattern also applies to the alternate screen buffer when it is displayed, and the paging logic introduces minor differences in the exact timing of ULA memory access.
+
 ## The I/O Philosophy
 
-The Spectrum uses the Z80's dedicated I/O space. You communicate with the ULA, keyboard, and audio using `IN` and `OUT` instructions targeting port addresses. To make things even more quirkier, the Spectrum only partially decodes port addresses. For example, the ULA responds to *any* even port number, though by convention, only Port `0xFE` is used.
+The Spectrum uses the Z80's dedicated I/O space. You communicate with the ULA, keyboard, and audio using `IN` and `OUT` instructions targeting port addresses. To make things even more quirkier, the Spectrum only partially decodes port addresses. For example, the ULA responds to *any* even port number, though by convention, only Port `0xFE` is used. Later models introduce additional I/O ports for memory paging (`0x7FFD`, `0x1FFD`) and the AY-3-8912 sound chip (`0xFFFD`, `0xBFFD`).
 
 ## Emulation Strategy Implications
 
