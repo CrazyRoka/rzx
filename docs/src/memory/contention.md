@@ -10,6 +10,12 @@ The ULA's I/O contention circuit had a timing error: it contended **all** I/O ac
 
 The fix prevents the ULA from asserting contention on odd port addresses (where A0 = 1), ensuring only even port I/O is subject to the ULA contention circuit. Without it, reading odd ports during the active display incurs unnecessary delay and the ULA may drive stale data onto the bus.
 
+## MREQ Decoding Note
+
+The Ferranti ULA (5C/6C) does **not** check the Z80's `/MREQ` line. It applies contention based solely on the address bus, meaning contention is triggered even during I/O cycles, DRAM refresh, and any spurious address bus activity. This is why the "dead cockroach" fix was needed — see above.
+
+The Amstrad gate array (+2A/+2B/+3) does check `/MREQ` and only applies contention during genuine memory access. This is why the +2A/+3 have a different (reduced) contention pattern and no contention on port 0xFE.
+
 ## Contended RAM Banks by Model
 
 | Model | Contended banks |
@@ -21,6 +27,12 @@ The fix prevents the ULA from asserting contention on odd port addresses (where 
 On 128K models, the alternate screen buffer in bank 7 is always contended, even when not displayed.
 
 ## 48K / Spectrum+ Contention
+
+### NTSC Contention
+
+The NTSC Spectrum uses the same 8-cycle 6,5,4,3,2,1,0,0 pattern but starts at **tstate 8959** rather than 14335. The frame has fewer total scanlines and a different line count.
+
+### Pattern
 
 The contention pattern follows an 8-cycle sequence repeating every 224 T-states (one scanline). It starts at cycle **14335** relative to the interrupt:
 
@@ -56,6 +68,8 @@ The same 8-cycle pattern as the 48K, but starting at cycle **14361** relative to
 
 The +2A/+3 use a different contention pattern. The first pixel of the screen is displayed at cycle **14364**; contention follows a 10-cycle sequence starting at cycle **14365**:
 
+> **Note on start timing:** Some sources list the +2A/+3 contention start at tstate **14361** rather than 14365. This 4-T-state discrepancy is due to the same "early vs late" timing effect described below — the Amstrad gate array does not exhibit thermal drift, but the raw pattern start is either 14361 (if considering the beginning of the scanline's contention window) or 14365 (after the first uncontended pixel). Both conventions exist in the literature; the 14365 value matches the first pixel timing.
+
 | Cycle # | Delay |
 |---|---|
 | 14365 | 1 |
@@ -77,6 +91,16 @@ The pattern continues until cycle 14494 (end of first scanline), then resets at 
 ### Combined Instruction Entries (+2A/+3)
 
 On the +2A/+3, instructions with multiple `pc+1` or `hl` entries in the 48K/128K breakdown are **combined into a single entry**. For example, `JR n` on 48K has `pc:4, pc+1:3, [pc+1:1×5]`; on +2A/+3 this becomes `pc:4, pc+1:8`. This applies throughout the instruction table below.
+
+## Early vs Late Timing
+
+On ULA-based machines (16K/48K/128K/+2), the contention timings can be **1 T-state later** than the values shown above when the ULA has warmed up. This is known as "late timing" (vs "early timing" for a cold machine). The physical cause is the ULA's increased thermal resistance as it heats up.
+
+- A machine that has been off and is just switched on exhibits **early timing** (the values in this document).
+- A machine that has been running for some time may exhibit **late timing** (add 1 to all T-state counts).
+- Amstrad gate array models (+2A/+2B/+3) do **not** exhibit this behaviour.
+
+Some emulators provide a "late timing" option to toggle between the two states. The 14335/14336 ambiguity seen in some references is related to this — resources that label the first INT-low tstate as **tstate 1** (rather than tstate 0 as used here) produce counts one higher, which is a notational difference, not the same as thermal drift.
 
 ## Wait State Insertion
 

@@ -48,4 +48,30 @@ P/V for `IND/INDR/OUTD/OTDR` (first value) and `INI/INIR/OUTI/OTIR` (second valu
 
 ## Manufacturer Differences
 
-TODO: Document known differences between Z80 manufacturers (Mostek, Sharp, SGS, Zilog) and their effect on undocumented opcodes.
+### NMOS vs CMOS Z80
+
+The documented instruction set is identical across all Z80 variants, but NMOS and CMOS implementations differ on several undocumented instructions:
+
+| Feature | NMOS (Zilog, NEC, Mostek) | CMOS (Zilog, Toshiba) |
+|---|---|---|
+| `OUT (C),0` | Writes 0 to the port | Writes **255** (`OUT (C),255`) |
+| `LD A,I` / `LD A,R` | IFF2 bug: records state after interrupt reset during the instruction | Bug fixed — IFF2 state is captured correctly |
+| HALT during refresh | R increments, memory refreshed | R **not** incremented, **no refresh** during HALT |
+| `SCF`/`CCF` bits 3/5 | OR of previous F bits 3/5 with A bits 3/5 | AND with unknown value (unreliable) |
+
+**LD A,I / LD A,R bug:** On NMOS Z80s, if an interrupt arrives during `LD A,I` or `LD A,R`, IFF2 is reset before the instruction reads the flag state, so the instruction records the **wrong** interrupt state. This can be used to **detect** the CPU type: an NMOS Z80 will show IFF2 = 0 after the instruction, while a CMOS Z80 shows the correct state.
+
+**OUT (C),0 vs OUT (C),255:** This is the most reliable runtime detection method — write to a harmless port and read it back. NMOS returns 0, CMOS returns 255.
+
+### U880 and East European Clones
+
+The **U880** (East German), **Т34ВМ1** / **T34VM1** (Russian, Angstrem), and **КР1858ВМ1** / **KR1858VM1** (Russian) are Z80 clones used in machines like the Didaktik Gama. They differ from Zilog Z80s in setting the **carry flag after OUTI** differently. The **UA880D** may run at 4 MHz; the **UB880D** is rated for 2.5 MHz.
+
+A CMOS clone, the **КР1858ВМ3** / **KR1858VM3**, exhibits the same CMOS HALT behaviour (no R increment, no refresh) and additionally permits HALT during DI (interrupts remain disabled afterwards) and interrupts HALT immediately rather than after a delay.
+
+### SCF/CCF Timing Dependence
+
+On genuine Zilog NMOS Z80s, the way bits 5 and 3 are affected by `SCF`/`CCF` depends on the **previous instruction**:
+- If the previous instruction **modified** the flags: bits 5/3 are **copied** from A (move).
+- If the previous instruction **did not modify** the flags (or after an interrupt): bits 5/3 are **ORed** from A.
+- On NEC and other clones: the OR becomes an **AND** with an unknown value, making the result unreliable.

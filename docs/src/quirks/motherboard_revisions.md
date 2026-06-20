@@ -28,9 +28,10 @@
 - Described in the service manual but **no known units exist** in the wild.
 - Exact changes are undocumented.
 
-## Issue 6
-- Includes changes required for the AMI SAGA gate array (ASIC).
-- Only one machine known to exist.
+## Issue 6 (1985)
+- Includes changes required for the **AMI SAGA** gate array (a custom ASIC replacing the Ferranti ULA).
+- Only **one machine is known to exist**: Issue 6A board in a Spectrum+ case, marked with a sticker requesting return to Sinclair's QA manager for repair.
+- AMI SAGA differences: runs significantly cooler, no chroma bias circuitry needed, clock clean enough to drive Z80 directly without amplification.
 - Introduces the **ZX8401** (also marked PCF1306P) — a single IC that consolidates the six 74LS logic ICs previously used for memory access control.
 
 ## Summary Table

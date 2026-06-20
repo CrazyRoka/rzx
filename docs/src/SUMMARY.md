@@ -69,6 +69,7 @@
   - [Model Detection](./quirks/model_detection.md)
   - [ZX Interface I & II](./quirks/zx_interface1.md)
   - [I/O Port Map](./quirks/io_port_map.md)
+  - [Edge Connector](./quirks/edge_connector.md)
 
 # Peripherals
 

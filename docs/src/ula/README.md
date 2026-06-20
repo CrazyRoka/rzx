@@ -4,9 +4,60 @@ The ULA (Uncommitted Logic Array) is the Spectrum's custom silicon — a hardwir
 
 ## ULA Series Revisions
 
-The initial ULA series is the **5C**. Ferranti later switched to the **6C** series, which uses less power (runs cooler) and introduced changes to the EAR socket handling that caused compatibility differences with tape loading (see [EAR/MIC Circuit Delays](../quirks/ear_mic_delays.md)). The 6C series was used from the Issue 3 motherboard onwards.
+The initial ULA series is the **5C** (Ferranti). Later revisions include **6C** (Ferranti, lower power, used from Issue 3), **7K010E** (Ferranti, also labelled **Amstrad 40056**, used in 128K and +2), and the **Amstrad gate array** (used in +2A, +3, +2B, +3B — a completely different design).
+
+The 6C series introduced changes to the EAR socket handling that caused compatibility differences with tape loading (see [EAR/MIC Circuit Delays](../quirks/ear_mic_delays.md)).
 
 The first production batch of 5C ULAs all failed to operate correctly except for one — a speck of dust had landed on the die in exactly the right position to bridge an otherwise disconnected part of the clock circuit.
+
+### AMI SAGA
+
+Sinclair produced a special batch of Spectrums with an **AMI SAGA** gate array instead of the Ferranti ULA. Only one confirmed machine exists (Issue 6A board in a Spectrum+ case). Key differences:
+- Runs at a much lower temperature.
+- Does **not** require the chroma bias circuitry (absent from the board).
+- Clock signal clean enough to drive the Z80 directly (no amplification needed).
+- A sticker on the case instructed that the machine be returned to Sinclair's QA manager should it require repair.
+
+### ULAplus
+
+ULAplus is a third-party plug-in replacement for the Ferranti ULA that adds a **64-colour paletted video mode** while remaining compatible with the original attribute system. It was designed by Andrew "Soviet" Collier and implemented in multiple variants (CPLD-based, FPGA-based).
+
+The key enhancement is an internal colour palette of 64 entries (6-bit RRRGGGBBB), programmable via I/O ports. In ULAplus mode, attribute bytes are reinterpreted as palette indices rather than directly encoding INK/PAPER colours. The original attribute mode (Flash, Bright, Ink, Paper) remains available as the default.
+
+ULAplus detection is performed by writing a signature value to port `0xBF3B` and reading back the result.
+
+## 7C ULA (48-pin)
+
+The later 7C ULA is a 48-pin package with additional signals for RGB, BRIGHT, and DMA. Its pinout differs significantly from the 40-pin 5C/6C:
+
+```
+                    +------+
+  17M           1   |      |   48  GND (0V)
+  /CAS          2   |      |   47  8.8M
+  C             3   |      |   46  8.8M
+  DMA0          4   |      |   45  /MREQ
+  DMA1          5   |      |   44  A15
+  DMA2          6   |      |   43  A14
+  DMA3          7   |      |   42  /RAS
+  DMA4          8   |      |   41  /ROMS
+  DMA5          9   |      |   40  /IORQ
+  DMA6         10   |      |   39  PHICPU
+  DMA7         11   |      |   38  D7
+  /VB          12   |      |   37  D6
+  +5V          13   |      |   36  D5
+  +5V          14   |      |   35  /MIC
+  /RD          15   |      |   34  /EAR
+  /WR          16   |      |   33  D4
+  /INT         17   |      |   32  KB0
+  /DRAMWE      18   |      |   31  D3
+  B            19   |      |   30  KB1
+  G            20   |      |   29  KB2
+  R            21   |      |   28  D2
+  BRIGHT       22   |      |   27  D1
+  /SYNC        23   |      |   26  KB3
+  D0           24   |      |   25  KB4
+                    +------+
+```
 
 ## Pinout (40-pin DIP)
 

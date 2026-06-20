@@ -41,6 +41,10 @@ For +3 models:
 
 Supports the +3's dual paging ports and can intercept writes to pages being swapped.
 
+## Melodik
+
+An external AY-3-8912 interface for pre-128K Spectrums, developed in Poland. Uses the same I/O ports as the 128K (`0xFFFD`/`0xBFFD`). The AY clock is **1.75 MHz**.
+
 ## Currah µSpeech
 
 A speech synthesiser attaching to the expansion port. It reproduces speech using **allophones** — phonetic descriptions of words or letters. Phrases can be composed with emphasis on hard sounds as required. A table of allophone sets is included in the µSpeech programming manual. Several commercial games support it.
@@ -70,6 +74,10 @@ A 2-button mouse readable from machine code or BASIC:
 | Horizontal position | IN `64479` |
 | Vertical position | IN `65503` |
 | Buttons | IN `64223` — 255 = none, 254 = left, 253 = right, 252 = both |
+
+## Third-Party Keyboard Interfaces
+
+Some third-party keyboard interfaces plug into the expansion edge connector and add buffers onto the bus, bypassing the ULA. This works on 16K/48K/128K/+2 because the ULA is **resistor-coupled** to the Z80 on the data lines, allowing external buffers to override the bus. These interfaces will **not work reliably on the +2A/+2B/+3** — the Amstrad gate array connects directly to the CPU, and driving the bus from an external buffer risks damaging the hardware.
 
 ## Timex TS1016
 
