@@ -1,0 +1,6 @@
+[submodule "tests/z80"]
+	path = tests/z80
+	url = https://github.com/SingleStepTests/z80.git
+[submodule "crates/z80/tests/z80"]
+	path = crates/z80/tests/z80
+	url = https://github.com/SingleStepTests/z80.git
