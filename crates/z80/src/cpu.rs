@@ -218,6 +218,77 @@ impl Z80 {
         self.set_hl(result);
     }
 
+    fn add_a(&mut self, value: u8, with_carry: bool) {
+        let c = if with_carry && self.f & FLAG_CARRY != 0 {
+            1
+        } else {
+            0
+        };
+        let result = self.a as u16 + value as u16 + c as u16;
+        let half_carry = (self.a & 0x0F) + (value & 0x0F) + c > 0x0F;
+        let result8 = result as u8;
+        let overflow = ((self.a ^ result8) & (value ^ result8) & 0x80) != 0;
+        self.f = if result8 == 0 { FLAG_ZERO } else { 0 }
+            | if result8 & 0x80 != 0 { FLAG_SIGN } else { 0 }
+            | if half_carry { FLAG_HALF_CARRY } else { 0 }
+            | if overflow { FLAG_PARITY } else { 0 }
+            | if result > 0xFF { FLAG_CARRY } else { 0 }
+            | (result8 & 0x28);
+        self.q = !self.q;
+        self.a = result8;
+    }
+
+    fn sub_a(&mut self, value: u8, with_carry: bool, store: bool) {
+        let c = if with_carry && self.f & FLAG_CARRY != 0 {
+            1
+        } else {
+            0
+        };
+        let result = self.a.wrapping_sub(value).wrapping_sub(c);
+        let carry = (self.a as u16) < value as u16 + c as u16;
+        let half_carry = ((self.a & 0x0F) as u16) < (value & 0x0F) as u16 + c as u16;
+        let overflow = ((self.a ^ value) & 0x80) != 0 && ((self.a ^ result) & 0x80) != 0;
+        self.f = if result == 0 { FLAG_ZERO } else { 0 }
+            | if result & 0x80 != 0 { FLAG_SIGN } else { 0 }
+            | if half_carry { FLAG_HALF_CARRY } else { 0 }
+            | if overflow { FLAG_PARITY } else { 0 }
+            | if carry { FLAG_CARRY } else { 0 }
+            | FLAG_ADD_OR_SUBTRACT
+            | if store { result & 0x28 } else { value & 0x28 };
+        self.q = !self.q;
+        if store {
+            self.a = result;
+        }
+    }
+
+    fn and_a(&mut self, value: u8) {
+        self.a &= value;
+        self.f = if self.a == 0 { FLAG_ZERO } else { 0 }
+            | if self.a & 0x80 != 0 { FLAG_SIGN } else { 0 }
+            | FLAG_HALF_CARRY
+            | if Self::parity(self.a) { FLAG_PARITY } else { 0 }
+            | (self.a & 0x28);
+        self.q = !self.q;
+    }
+
+    fn xor_a(&mut self, value: u8) {
+        self.a ^= value;
+        self.f = if self.a == 0 { FLAG_ZERO } else { 0 }
+            | if self.a & 0x80 != 0 { FLAG_SIGN } else { 0 }
+            | if Self::parity(self.a) { FLAG_PARITY } else { 0 }
+            | (self.a & 0x28);
+        self.q = !self.q;
+    }
+
+    fn or_a(&mut self, value: u8) {
+        self.a |= value;
+        self.f = if self.a == 0 { FLAG_ZERO } else { 0 }
+            | if self.a & 0x80 != 0 { FLAG_SIGN } else { 0 }
+            | if Self::parity(self.a) { FLAG_PARITY } else { 0 }
+            | (self.a & 0x28);
+        self.q = !self.q;
+    }
+
     fn daa(&mut self) {
         let a = self.a;
         let carry = self.f & FLAG_CARRY != 0;
@@ -636,6 +707,24 @@ impl Z80 {
                 dbg!("HALT CALLED");
                 4
             }
+            0x80..=0xBF => {
+                let op = (opcode >> 3) & 7;
+                let src = opcode & 7;
+                let val = self.get_reg(bus, src);
+                match op {
+                    0 => self.add_a(val, false),        // ADD
+                    1 => self.add_a(val, true),         // ADC
+                    2 => self.sub_a(val, false, true),  // SUB
+                    3 => self.sub_a(val, true, true),   // SBC
+                    4 => self.and_a(val),               // AND
+                    5 => self.xor_a(val),               // XOR
+                    6 => self.or_a(val),                // OR
+                    7 => self.sub_a(val, false, false), // CP
+                    _ => unreachable!(),
+                }
+                if src == 6 { 7 } else { 4 }
+            }
+
             _ => panic!("Unexpected opcode {opcode:02X}"),
         }
     }
@@ -951,5 +1040,69 @@ mod tests {
          test_ld_a_l   => "7d.json",
          test_ld_a_hlp => "7e.json",
          test_ld_a_a   => "7f.json",
+         test_add_a_b   => "80.json",
+         test_add_a_c   => "81.json",
+         test_add_a_d   => "82.json",
+         test_add_a_e   => "83.json",
+         test_add_a_h   => "84.json",
+         test_add_a_l   => "85.json",
+         test_add_a_hlp => "86.json",
+         test_add_a_a   => "87.json",
+         test_adc_a_b   => "88.json",
+         test_adc_a_c   => "89.json",
+         test_adc_a_d   => "8a.json",
+         test_adc_a_e   => "8b.json",
+         test_adc_a_h   => "8c.json",
+         test_adc_a_l   => "8d.json",
+         test_adc_a_hlp => "8e.json",
+         test_adc_a_a   => "8f.json",
+         test_sub_b     => "90.json",
+         test_sub_c     => "91.json",
+         test_sub_d     => "92.json",
+         test_sub_e     => "93.json",
+         test_sub_h     => "94.json",
+         test_sub_l     => "95.json",
+         test_sub_hlp   => "96.json",
+         test_sub_a     => "97.json",
+         test_sbc_a_b   => "98.json",
+         test_sbc_a_c   => "99.json",
+         test_sbc_a_d   => "9a.json",
+         test_sbc_a_e   => "9b.json",
+         test_sbc_a_h   => "9c.json",
+         test_sbc_a_l   => "9d.json",
+         test_sbc_a_hlp => "9e.json",
+         test_sbc_a_a   => "9f.json",
+         test_and_b     => "a0.json",
+         test_and_c     => "a1.json",
+         test_and_d     => "a2.json",
+         test_and_e     => "a3.json",
+         test_and_h     => "a4.json",
+         test_and_l     => "a5.json",
+         test_and_hlp   => "a6.json",
+         test_and_a     => "a7.json",
+         test_xor_b     => "a8.json",
+         test_xor_c     => "a9.json",
+         test_xor_d     => "aa.json",
+         test_xor_e     => "ab.json",
+         test_xor_h     => "ac.json",
+         test_xor_l     => "ad.json",
+         test_xor_hlp   => "ae.json",
+         test_xor_a     => "af.json",
+         test_or_b      => "b0.json",
+         test_or_c      => "b1.json",
+         test_or_d      => "b2.json",
+         test_or_e      => "b3.json",
+         test_or_h      => "b4.json",
+         test_or_l      => "b5.json",
+         test_or_hlp    => "b6.json",
+         test_or_a      => "b7.json",
+         test_cp_b      => "b8.json",
+         test_cp_c      => "b9.json",
+         test_cp_d      => "ba.json",
+         test_cp_e      => "bb.json",
+         test_cp_h      => "bc.json",
+         test_cp_l      => "bd.json",
+         test_cp_hlp    => "be.json",
+         test_cp_a      => "bf.json",
     }
 }
