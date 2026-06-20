@@ -623,6 +623,19 @@ impl Z80 {
                 self.q = !self.q;
                 4
             }
+            0x40..=0x7F if opcode != 0x76 => {
+                let dst = (opcode >> 3) & 7;
+                let src = opcode & 7;
+                let val = self.get_reg(bus, src);
+                self.set_reg(bus, dst, val);
+                if dst == 6 || src == 6 { 7 } else { 4 }
+            }
+            0x76 => {
+                // HALT
+                // TODO: handle halt
+                dbg!("HALT CALLED");
+                4
+            }
             _ => panic!("Unexpected opcode {opcode:02X}"),
         }
     }
@@ -874,5 +887,69 @@ mod tests {
          test_dec_a    => "3d.json",
          test_ld_a_n   => "3e.json",
          test_ccf      => "3f.json",
+         test_ld_b_b   => "40.json",
+         test_ld_b_c   => "41.json",
+         test_ld_b_d   => "42.json",
+         test_ld_b_e   => "43.json",
+         test_ld_b_h   => "44.json",
+         test_ld_b_l   => "45.json",
+         test_ld_b_hlp => "46.json",
+         test_ld_b_a   => "47.json",
+         test_ld_c_b   => "48.json",
+         test_ld_c_c   => "49.json",
+         test_ld_c_d   => "4a.json",
+         test_ld_c_e   => "4b.json",
+         test_ld_c_h   => "4c.json",
+         test_ld_c_l   => "4d.json",
+         test_ld_c_hlp => "4e.json",
+         test_ld_c_a   => "4f.json",
+         test_ld_d_b   => "50.json",
+         test_ld_d_c   => "51.json",
+         test_ld_d_d   => "52.json",
+         test_ld_d_e   => "53.json",
+         test_ld_d_h   => "54.json",
+         test_ld_d_l   => "55.json",
+         test_ld_d_hlp => "56.json",
+         test_ld_d_a   => "57.json",
+         test_ld_e_b   => "58.json",
+         test_ld_e_c   => "59.json",
+         test_ld_e_d   => "5a.json",
+         test_ld_e_e   => "5b.json",
+         test_ld_e_h   => "5c.json",
+         test_ld_e_l   => "5d.json",
+         test_ld_e_hlp => "5e.json",
+         test_ld_e_a   => "5f.json",
+         test_ld_h_b   => "60.json",
+         test_ld_h_c   => "61.json",
+         test_ld_h_d   => "62.json",
+         test_ld_h_e   => "63.json",
+         test_ld_h_h   => "64.json",
+         test_ld_h_l   => "65.json",
+         test_ld_h_hlp => "66.json",
+         test_ld_h_a   => "67.json",
+         test_ld_l_b   => "68.json",
+         test_ld_l_c   => "69.json",
+         test_ld_l_d   => "6a.json",
+         test_ld_l_e   => "6b.json",
+         test_ld_l_h   => "6c.json",
+         test_ld_l_l   => "6d.json",
+         test_ld_l_hlp => "6e.json",
+         test_ld_l_a   => "6f.json",
+         test_ld_hlp_b => "70.json",
+         test_ld_hlp_c => "71.json",
+         test_ld_hlp_d => "72.json",
+         test_ld_hlp_e => "73.json",
+         test_ld_hlp_h => "74.json",
+         test_ld_hlp_l => "75.json",
+         test_halt     => "76.json",
+         test_ld_hlp_a => "77.json",
+         test_ld_a_b   => "78.json",
+         test_ld_a_c   => "79.json",
+         test_ld_a_d   => "7a.json",
+         test_ld_a_e   => "7b.json",
+         test_ld_a_h   => "7c.json",
+         test_ld_a_l   => "7d.json",
+         test_ld_a_hlp => "7e.json",
+         test_ld_a_a   => "7f.json",
     }
 }
