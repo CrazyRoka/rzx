@@ -12,15 +12,17 @@ This minimalist core remained at the heart of the family even as later models ad
 
 This book covers the following ZX Spectrum models:
 
-| Model | Year | CPU | Key Differences |
-|---|---|---|---|
-| 16K | 1982 | 3.5 MHz | Original, 16 KB RAM, 16 KB ROM |
-| 48K | 1982 | 3.5 MHz | 48 KB RAM, identical otherwise |
-| Spectrum+ | 1984 | 3.5 MHz | 48K internals, new keyboard case |
-| 128K | 1985 | ~3.5469 MHz | 128 KB RAM, AY-3-8912 sound, keypad, new ROM |
-| +2 | 1986 | ~3.5469 MHz | 128K hardware, grey case, built-in tape deck |
-| +3 | 1987 | ~3.5469 MHz | 128K with 3" floppy drive, CP/M support, WD1770 FDC |
-| +2A/+2B | 1987–88 | ~3.5469 MHz | +3 motherboard in +2 case, no disk drive |
+| Model | Year | CPU | ROM | RAM | Key Differences |
+|---|---|---|---|---|---|---|
+| 16K | 1982 | 3.5 MHz | 16 KB | 16 KB | Original |
+| 48K | 1982 | 3.5 MHz | 16 KB | 48 KB | Baseline reference model |
+| Spectrum+ | 1984 | 3.5 MHz | 16 KB | 48 KB | New keyboard case, reset button |
+| 128K | 1985 | ~3.5469 MHz | 32 KB | 128 KB | AY-3-8912 sound, keypad, MIDI, RGB |
+| +2 | 1986 | ~3.5469 MHz | 32 KB | 128 KB | Built-in tape deck, 2 joystick ports |
+| +3 | 1987 | ~3.5469 MHz | 64 KB | 128 KB | 3" floppy drive, CP/M, +3DOS |
+| +2A/+2B | 1987–88 | ~3.5469 MHz | 64 KB | 128 KB | +3 motherboard in +2 case, no disk |
+
+Timex also produced several Spectrum-compatible or Spectrum-derived models (TS2068, TC2048, TC2068) with additional video modes, built-in joystick ports, and other differences — see [Timex Models](../appendix/timex_models.md).
 
 Where a feature is model-specific, it is explicitly called out. Sections that do not specify a model describe the baseline behaviour shared across the entire family.
 

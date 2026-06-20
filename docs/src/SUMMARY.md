@@ -82,4 +82,5 @@
   - [ULA & Timing Tests (Fusetest)](./testing/fusetest.md)
   - [Real-World Game Tests](./testing/game_tests.md)
 - [Power Supplies](./appendix/power_supplies.md)
+- [Timex Models](./appendix/timex_models.md)
 - [Appendix: FAQ & References](./appendix/faq_reference.md)

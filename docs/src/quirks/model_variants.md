@@ -22,38 +22,71 @@
 - Original Sinclair model, 16 KB RAM (only `0x4000–0x7FFF` populated)
 - Upper 32 KB may mirror lower RAM on some boards
 - Identical timing to 48K
+- Power supply: 9 V DC @ 1.4 A, centre -ve
+- Membrane keyboard, 40 keys
 
 ### 48K (1982)
 - The baseline reference model. 48 KB RAM.
 - Most documentation assumes this model unless noted.
+- Power supply: 9 V DC @ 1.4 A, centre -ve
+- Membrane keyboard, 40 keys (later + model: 58 keys)
 
 ### Spectrum+ (1984)
 - 48K internals in a new keyboard case with a reset button.
 - Identical to 48K for emulation purposes.
+- 58-key keyboard.
 
 ### 128K (1985, Sinclair)
 - First model with 128 KB RAM and bank switching.
 - AY-3-8912 sound chip.
-- Numeric keypad with editing functions.
+- Numeric keypad with editing functions (58 keys total).
 - Faster CPU clock (~3.5469 MHz) and altered video timing.
+- RGB output via standard monitor connector.
+- Built-in MIDI interface.
 - The I register snow bug also exists on this model, and additionally crashes the machine shortly after I is set to point to contended memory.
 - Port 0xFE bit 6 behaviour matches Issue 3.
+- Power supply: 9 V DC @ 1.85 A, centre -ve.
 
 ### +2 (1986, Amstrad)
-- 128K hardware in a grey case with built-in CASSETTE deck.
+- 128K hardware in a grey case with built-in cassette deck.
 - Two built-in Sinclair-style joystick ports (non-standard pinout).
-- Timing and memory identical to 128K.
+- Timing and memory identical to 128K. No MIDI interface.
+- Power supply: 9 V DC @ 2.1 A, centre -ve.
 
 ### +3 (1987, Amstrad)
 - 128K with a 3" floppy disk drive, WD1770 FDC.
-- Four ROM banks (editor, syntax checker, +3DOS, 48K BASIC).
+- Four ROM banks totalling 64 KB (editor, syntax checker, +3DOS, 48K BASIC).
 - Additional paging port `0x1FFD` with special memory modes.
 - Port 0xFE bit 6 always returns 0 (no EAR/MIC dependency).
 - No floating bus — unused ports always return 255.
 - Port 0xFE is not contended.
 - Different contention pattern and combined instruction entries.
+- Power supply: +5 V @ 2 A, +12 V @ 700 mA, -12 V @ 50 mA.
 
 ### +2A / +2B (1987–88, Amstrad)
 - +3 motherboard in a +2-style case, no disk drive.
 - Same memory paging, timing, and contention as the +3.
 - Same port 0xFE and floating bus behaviour as the +3.
+- Black case (+2A) / darker grey (+2B).
+- +12 V rail: 200 mA (reduced from +3).
+
+### TS2068 (1985, Timex — USA)
+- Enhanced Spectrum, 48 KB RAM, 24 KB ROM (3 banks of 8 KB).
+- CPU: Z80A @ 3.528 MHz.
+- AY-3-8912 sound chip.
+- Four video modes (see [Timex Models](../appendix/timex_models.md)).
+- Two built-in joystick ports.
+- Edge connector incompatible with Sinclair Spectrum peripherals.
+- Power supply: 15 V DC @ 1.0 A, centre -ve.
+
+### TC2048 (Timex — Portugal)
+- 99% Spectrum-compatible.
+- Kempston joystick port built in.
+- Extra display modes retained from TS2068. No AY-3-8912.
+- Power supply: 9 V DC @ 800 mA, centre -ve.
+
+### TC2068 (Timex — Portugal)
+- PAL variant of TS2068.
+- Edge connector compatible with Sinclair Spectrum peripherals.
+- BASIC 64 in ROM.
+- Power supply: 9 V DC @ 1.0 A, centre -ve.
