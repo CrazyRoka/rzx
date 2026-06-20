@@ -19,6 +19,7 @@ struct Z80 {
     l: u8,
     // w: u8
     // z: u8
+    q: u8,
     a_shadow: u8,
     b_shadow: u8,
     c_shadow: u8,
@@ -42,13 +43,543 @@ impl Z80 {
 
     pub fn execute<B: Bus>(&mut self, bus: &mut B) -> u64 {
         let opcode = self.read_byte(bus);
-        4
+        let old_f = self.f;
+        let old_q = self.q;
+        let cycles = self.step(bus, opcode);
+        self.q = if (old_f != self.f || old_q != self.q) && opcode != 0x08 {
+            self.f
+        } else {
+            0
+        };
+        cycles
     }
 
     fn read_byte<B: Bus>(&mut self, bus: &mut B) -> u8 {
         let byte = bus.read(self.pc);
-        self.pc += 1;
+        self.pc = self.pc.wrapping_add(1);
         byte
+    }
+
+    fn read_word<B: Bus>(&mut self, bus: &mut B) -> u16 {
+        let lo = self.read_byte(bus) as u16;
+        let hi = self.read_byte(bus) as u16;
+        (hi << 8) | lo
+    }
+
+    fn bc(&self) -> u16 {
+        ((self.b as u16) << 8) | (self.c as u16)
+    }
+
+    fn set_bc(&mut self, value: u16) {
+        self.b = (value >> 8) as u8;
+        self.c = (value & 0xFF) as u8;
+    }
+
+    fn de(&self) -> u16 {
+        ((self.d as u16) << 8) | (self.e as u16)
+    }
+
+    fn set_de(&mut self, value: u16) {
+        self.d = (value >> 8) as u8;
+        self.e = (value & 0xFF) as u8;
+    }
+
+    fn hl(&self) -> u16 {
+        ((self.h as u16) << 8) | (self.l as u16)
+    }
+
+    fn set_hl(&mut self, value: u16) {
+        self.h = (value >> 8) as u8;
+        self.l = (value & 0xFF) as u8;
+    }
+
+    fn get_rp(&self, idx: u8) -> u16 {
+        match idx {
+            0 => self.bc(),
+            1 => self.de(),
+            2 => self.hl(),
+            3 => self.sp,
+            _ => unreachable!(),
+        }
+    }
+
+    fn set_rp(&mut self, idx: u8, value: u16) {
+        match idx {
+            0 => self.set_bc(value),
+            1 => self.set_de(value),
+            2 => self.set_hl(value),
+            3 => self.sp = value,
+            _ => unreachable!(),
+        }
+    }
+
+    fn get_reg<B: Bus>(&self, bus: &B, idx: u8) -> u8 {
+        match idx {
+            0 => self.b,
+            1 => self.c,
+            2 => self.d,
+            3 => self.e,
+            4 => self.h,
+            5 => self.l,
+            6 => bus.read(self.hl()),
+            7 => self.a,
+            _ => unreachable!(),
+        }
+    }
+
+    fn set_reg<B: Bus>(&mut self, bus: &mut B, idx: u8, value: u8) {
+        match idx {
+            0 => self.b = value,
+            1 => self.c = value,
+            2 => self.d = value,
+            3 => self.e = value,
+            4 => self.h = value,
+            5 => self.l = value,
+            6 => bus.write(self.hl(), value),
+            7 => self.a = value,
+            _ => unreachable!(),
+        }
+    }
+
+    fn parity(value: u8) -> bool {
+        value.count_ones() % 2 == 0
+    }
+
+    fn inc8(&mut self, value: u8) -> u8 {
+        let result = value.wrapping_add(1);
+        self.f = if result == 0 { FLAG_ZERO } else { 0 }
+            | if result & 0x80 != 0 { FLAG_SIGN } else { 0 }
+            | (result & 0x28) // Mirror bits 3 and 5 from the result
+            | if value & 0x0F == 0x0F {
+                FLAG_HALF_CARRY
+            } else {
+                0
+            }
+            | if value == 0x7F { FLAG_PARITY } else { 0 }
+            | (self.f & FLAG_CARRY);
+        self.q = !self.q;
+        result
+    }
+
+    fn dec8(&mut self, value: u8) -> u8 {
+        let result = value.wrapping_sub(1);
+        self.f = if result == 0 { FLAG_ZERO } else { 0 }
+            | if result & 0x80 != 0 { FLAG_SIGN } else { 0 }
+            | (result & 0x28) // Mirror bits 3 and 5 from the result
+            | if value & 0x0F == 0x00 {
+                FLAG_HALF_CARRY
+            } else {
+                0
+            }
+            | if value == 0x80 { FLAG_PARITY } else { 0 }
+            | FLAG_ADD_OR_SUBTRACT
+            | (self.f & FLAG_CARRY);
+        self.q = !self.q;
+        result
+    }
+
+    fn add_hl(&mut self, value: u16) {
+        let hl = self.hl();
+        let (result, carry) = hl.overflowing_add(value);
+        let half_carry = (hl & 0x0FFF) + (value & 0x0FFF) > 0x0FFF;
+        self.f = (self.f & (FLAG_SIGN | FLAG_ZERO | FLAG_PARITY))
+            | if half_carry { FLAG_HALF_CARRY } else { 0 }
+            | if carry { FLAG_CARRY } else { 0 }
+            | ((result >> 8) & 0x28) as u8;
+        self.q = !self.q;
+        self.set_hl(result);
+    }
+
+    fn daa(&mut self) {
+        let a = self.a;
+        let carry = self.f & FLAG_CARRY != 0;
+        let half = self.f & FLAG_HALF_CARRY != 0;
+        let sub = self.f & FLAG_ADD_OR_SUBTRACT != 0;
+        let mut add = 0u8;
+        let mut new_carry = carry;
+
+        if half || (a & 0x0F) > 9 {
+            add |= 0x06;
+        }
+        if carry || (a & 0xF0) > 0x90 || ((a & 0x0F) > 9 && (a & 0xF0) > 0x80) {
+            add |= 0x60;
+            new_carry = true;
+        }
+
+        self.a = if sub {
+            a.wrapping_sub(add)
+        } else {
+            a.wrapping_add(add)
+        };
+        self.f = if new_carry { FLAG_CARRY } else { 0 }
+            | if self.a == 0 { FLAG_ZERO } else { 0 }
+            | if self.a & 0x80 != 0 { FLAG_SIGN } else { 0 }
+            | if Self::parity(self.a) { FLAG_PARITY } else { 0 }
+            | if sub { FLAG_ADD_OR_SUBTRACT } else { 0 }
+            | (self.a & 0x28)
+            | if sub && half && (a & 0x0F) < 6 {
+                FLAG_HALF_CARRY
+            } else {
+                0
+            }
+            | if !sub && (a & 0x0F) > 9 {
+                FLAG_HALF_CARRY
+            } else {
+                0
+            };
+        self.q = !self.q;
+    }
+
+    fn step<B: Bus>(&mut self, bus: &mut B, opcode: u8) -> u64 {
+        match opcode {
+            // NOP
+            0x00 => 4, // NOP
+            0x01 => {
+                let word = self.read_word(bus);
+                self.set_bc(word);
+                10
+            } // LD BC,nn
+            0x02 => {
+                bus.write(self.bc(), self.a);
+                7
+            } // LD (BC),A
+            0x03 => {
+                self.set_bc(self.bc().wrapping_add(1));
+                6
+            } // INC BC
+            0x04 => {
+                self.b = self.inc8(self.b);
+                4
+            } // INC B
+            0x05 => {
+                self.b = self.dec8(self.b);
+                4
+            } // DEC B
+            0x06 => {
+                self.b = self.read_byte(bus);
+                7
+            } // LD B,n
+            0x07 => {
+                // RLCA
+                let c = self.a >> 7;
+                self.a = (self.a << 1) | c;
+                self.f = (self.f & (FLAG_SIGN | FLAG_ZERO | FLAG_PARITY)) | c | (self.a & 0x28);
+                self.q = !self.q;
+                4
+            }
+            0x08 => {
+                // EX AF,AF'
+                std::mem::swap(&mut self.a, &mut self.a_shadow);
+                std::mem::swap(&mut self.f, &mut self.f_shadow);
+                4
+            }
+            0x09 => {
+                self.add_hl(self.bc());
+                11
+            } // ADD HL,BC
+            0x0A => {
+                self.a = bus.read(self.bc());
+                7
+            } // LD A,(BC)
+            0x0B => {
+                self.set_bc(self.bc().wrapping_sub(1));
+                6
+            } // DEC BC
+            0x0C => {
+                self.c = self.inc8(self.c);
+                4
+            } // INC C
+            0x0D => {
+                self.c = self.dec8(self.c);
+                4
+            } // DEC C
+            0x0E => {
+                self.c = self.read_byte(bus);
+                7
+            } // LD C,n
+            0x0F => {
+                // RRCA
+                let c = self.a & 1;
+                self.a = (self.a >> 1) | (c << 7);
+                self.f = (self.f & (FLAG_SIGN | FLAG_ZERO | FLAG_PARITY)) | c | (self.a & 0x28);
+                self.q = !self.q; // reset inside execute
+                4
+            }
+            0x10 => {
+                // DJNZ d
+                self.b = self.b.wrapping_sub(1);
+                let displacement = self.read_byte(bus) as i8 as u16;
+                if self.b != 0 {
+                    self.pc = self.pc.wrapping_add(displacement);
+                    13
+                } else {
+                    8
+                }
+            }
+            0x11 => {
+                let word = self.read_word(bus);
+                self.set_de(word);
+                10
+            } // LD DE,nn
+            0x12 => {
+                bus.write(self.de(), self.a);
+                7
+            } // LD (DE),A
+            0x13 => {
+                self.set_de(self.de().wrapping_add(1));
+                6
+            } // INC DE
+            0x14 => {
+                self.d = self.inc8(self.d);
+                4
+            } // INC D
+            0x15 => {
+                self.d = self.dec8(self.d);
+                4
+            } // DEC D
+            0x16 => {
+                self.d = self.read_byte(bus);
+                7
+            } // LD D,n
+            0x17 => {
+                // RLA
+                let old_c = if self.f & FLAG_CARRY != 0 { 1 } else { 0 };
+                let new_c = self.a >> 7;
+                self.a = (self.a << 1) | old_c;
+                self.f = (self.f & (FLAG_SIGN | FLAG_ZERO | FLAG_PARITY)) | new_c | (self.a & 0x28);
+                self.q = !self.q; // reset inside execute
+                4
+            }
+            0x18 => {
+                // JR d
+                let displacement = self.read_byte(bus) as i8 as u16;
+                self.pc = self.pc.wrapping_add(displacement);
+                12
+            }
+            0x19 => {
+                self.add_hl(self.de());
+                11
+            } // ADD HL,DE
+            0x1A => {
+                self.a = bus.read(self.de());
+                7
+            } // LD A,(DE)
+            0x1B => {
+                self.set_de(self.de().wrapping_sub(1));
+                6
+            } // DEC DE
+            0x1C => {
+                self.e = self.inc8(self.e);
+                4
+            } // INC E
+            0x1D => {
+                self.e = self.dec8(self.e);
+                4
+            } // DEC E
+            0x1E => {
+                self.e = self.read_byte(bus);
+                7
+            } // LD E,n
+            0x1F => {
+                // RRA
+                let old_c = if self.f & FLAG_CARRY != 0 { 0x80 } else { 0 };
+                let new_c = self.a & 1;
+                self.a = (self.a >> 1) | old_c;
+                self.f = (self.f & (FLAG_SIGN | FLAG_ZERO | FLAG_PARITY)) | new_c | (self.a & 0x28);
+                self.q = !self.q;
+                4
+            }
+            0x20 => {
+                // JR NZ,d
+                let displacement = self.read_byte(bus) as i8 as u16;
+                if self.f & FLAG_ZERO == 0 {
+                    self.pc = self.pc.wrapping_add(displacement);
+                    12
+                } else {
+                    7
+                }
+            }
+            0x21 => {
+                let word = self.read_word(bus);
+                self.set_hl(word);
+                10
+            } // LD HL,nn
+            0x22 => {
+                // LD (nn),HL
+                let addr = self.read_word(bus);
+                bus.write(addr, self.l);
+                bus.write(addr.wrapping_add(1), self.h);
+                16
+            }
+            0x23 => {
+                self.set_hl(self.hl().wrapping_add(1));
+                6
+            } // INC HL
+            0x24 => {
+                self.h = self.inc8(self.h);
+                4
+            } // INC H
+            0x25 => {
+                self.h = self.dec8(self.h);
+                4
+            } // DEC H
+            0x26 => {
+                self.h = self.read_byte(bus);
+                7
+            } // LD H,n
+            0x27 => {
+                self.daa();
+                4
+            } // DAA
+            0x28 => {
+                // JR Z,d
+                let displacement = self.read_byte(bus) as i8 as u16;
+                if self.f & FLAG_ZERO != 0 {
+                    self.pc = self.pc.wrapping_add(displacement);
+                    12
+                } else {
+                    7
+                }
+            }
+            0x29 => {
+                self.add_hl(self.hl());
+                11
+            } // ADD HL,HL
+            0x2A => {
+                // LD HL,(nn)
+                let addr = self.read_word(bus);
+                self.l = bus.read(addr);
+                self.h = bus.read(addr.wrapping_add(1));
+                16
+            }
+            0x2B => {
+                self.set_hl(self.hl().wrapping_sub(1));
+                6
+            } // DEC HL
+            0x2C => {
+                self.l = self.inc8(self.l);
+                4
+            } // INC L
+            0x2D => {
+                self.l = self.dec8(self.l);
+                4
+            } // DEC L
+            0x2E => {
+                self.l = self.read_byte(bus);
+                7
+            } // LD L,n
+            0x2F => {
+                // CPL
+                self.a = !self.a;
+                self.f = (self.f & (FLAG_SIGN | FLAG_ZERO | FLAG_PARITY | FLAG_CARRY))
+                    | FLAG_HALF_CARRY
+                    | FLAG_ADD_OR_SUBTRACT
+                    | (self.a & 0x28); // Mirror bits 3 and 5 from the new A
+                self.q = !self.q;
+                4
+            }
+            0x30 => {
+                // JR NC,d
+                let displacement = self.read_byte(bus) as i8 as u16;
+                if self.f & FLAG_CARRY == 0 {
+                    self.pc = self.pc.wrapping_add(displacement);
+                    12
+                } else {
+                    7
+                }
+            }
+            0x31 => {
+                self.sp = self.read_word(bus);
+                10
+            } // LD SP,nn
+            0x32 => {
+                // LD (nn),A
+                let addr = self.read_word(bus);
+                bus.write(addr, self.a);
+                13
+            }
+            0x33 => {
+                self.sp = self.sp.wrapping_add(1);
+                6
+            } // INC SP
+            0x34 => {
+                // INC (HL)
+                let addr = self.hl();
+                let value = bus.read(addr);
+                let result = self.inc8(value);
+                bus.write(addr, result);
+                11
+            }
+            0x35 => {
+                // DEC (HL)
+                let addr = self.hl();
+                let value = bus.read(addr);
+                let result = self.dec8(value);
+                bus.write(addr, result);
+                11
+            }
+            0x36 => {
+                // LD (HL),n
+                let value = self.read_byte(bus);
+                bus.write(self.hl(), value);
+                10
+            }
+            0x37 => {
+                // SCF
+                self.f = (self.f & (FLAG_SIGN | FLAG_ZERO | FLAG_PARITY))
+                    | FLAG_CARRY
+                    | (((self.q ^ self.f) | self.a) & 0x28);
+                self.q = !self.q;
+                4
+            }
+            0x38 => {
+                // JR C,d
+                let displacement = self.read_byte(bus) as i8 as u16;
+                if self.f & FLAG_CARRY != 0 {
+                    self.pc = self.pc.wrapping_add(displacement);
+                    12
+                } else {
+                    7
+                }
+            }
+            0x39 => {
+                self.add_hl(self.sp);
+                11
+            } // ADD HL,SP
+            0x3A => {
+                // LD A,(nn)
+                let addr = self.read_word(bus);
+                self.a = bus.read(addr);
+                13
+            }
+            0x3B => {
+                self.sp = self.sp.wrapping_sub(1);
+                6
+            } // DEC SP
+            0x3C => {
+                self.a = self.inc8(self.a);
+                4
+            } // INC A
+            0x3D => {
+                self.a = self.dec8(self.a);
+                4
+            } // DEC A
+            0x3E => {
+                self.a = self.read_byte(bus);
+                7
+            } // LD A,n
+            0x3F => {
+                // CCF
+                let old_carry = self.f & FLAG_CARRY;
+                self.f = (self.f & (FLAG_SIGN | FLAG_ZERO | FLAG_PARITY))
+                    | if old_carry != 0 { FLAG_HALF_CARRY } else { 0 }
+                    | if old_carry == 0 { FLAG_CARRY } else { 0 }
+                    | (((self.q ^ self.f) | self.a) & 0x28);
+                self.q = !self.q;
+                4
+            }
+            _ => panic!("Unexpected opcode {opcode:02X}"),
+        }
     }
 }
 
@@ -100,7 +631,7 @@ mod tests {
         hl_: u16,
         // "im": 0,
         // "p": 1,
-        // "q": 0,
+        q: u8,
         // "iff1": 0,
         // "iff2": 1,
         ram: Vec<(u16, u8)>,
@@ -118,6 +649,7 @@ mod tests {
             cpu.f = self.f;
             cpu.h = self.h;
             cpu.l = self.l;
+            cpu.q = self.q;
             cpu.ix = self.ix;
             cpu.iy = self.iy;
             cpu.a_shadow = (self.af_ >> 8) as u8;
@@ -185,25 +717,88 @@ mod tests {
             assert_eq!(
                 case.cycles.len() as u64,
                 cycles,
-                "{}: CPU cycles produced doesn't match with the test case",
+                "Test Case '{}': CPU cycles produced doesn't match with the test case",
                 case.name
             );
             assert_eq!(
                 case.final_state.create_memory(),
                 bus,
-                "{}: RAM state doesn't match the expected final state",
+                "Test Case '{}': RAM state doesn't match the expected final state",
                 case.name
             );
             assert_eq!(
                 case.final_state.create_cpu(),
                 cpu,
-                "{}: CPU state doesn't match the expected final state",
+                "Test Case '{}': CPU state doesn't match the expected final state",
                 case.name
             );
         }
     }
 
     z80_tests! {
-        test_nop      => "00.json",
+         test_nop      => "00.json",
+         test_ld_bc_nn => "01.json",
+         test_ld_bcp_a => "02.json",
+         test_inc_bc   => "03.json",
+         test_inc_b    => "04.json",
+         test_dec_b    => "05.json",
+         test_ld_b_n   => "06.json",
+         test_rlca     => "07.json",
+         test_ex_af_af => "08.json",
+         test_add_hl_bc=> "09.json",
+         test_ld_a_bcp => "0a.json",
+         test_dec_bc   => "0b.json",
+         test_inc_c    => "0c.json",
+         test_dec_c    => "0d.json",
+         test_ld_c_n   => "0e.json",
+         test_rrca     => "0f.json",
+         test_djnz_d   => "10.json",
+         test_ld_de_nn => "11.json",
+         test_ld_dep_a => "12.json",
+         test_inc_de   => "13.json",
+         test_inc_d    => "14.json",
+         test_dec_d    => "15.json",
+         test_ld_d_n   => "16.json",
+         test_rla      => "17.json",
+         test_jr_d     => "18.json",
+         test_add_hl_de=> "19.json",
+         test_ld_a_dep => "1a.json",
+         test_dec_de   => "1b.json",
+         test_inc_e    => "1c.json",
+         test_dec_e    => "1d.json",
+         test_ld_e_n   => "1e.json",
+         test_rra      => "1f.json",
+         test_jr_nz_d  => "20.json",
+         test_ld_hl_nn => "21.json",
+         test_ld_nnp_hl=> "22.json",
+         test_inc_hl   => "23.json",
+         test_inc_h    => "24.json",
+         test_dec_h    => "25.json",
+         test_ld_h_n   => "26.json",
+         test_daa      => "27.json",
+         test_jr_z_d   => "28.json",
+         test_add_hl_hl=> "29.json",
+         test_ld_hl_nnp=> "2a.json",
+         test_dec_hl   => "2b.json",
+         test_inc_l    => "2c.json",
+         test_dec_l    => "2d.json",
+         test_ld_l_n   => "2e.json",
+         test_cpl      => "2f.json",
+         test_jr_nc_d  => "30.json",
+         test_ld_sp_nn => "31.json",
+         test_ld_nnp_a => "32.json",
+         test_inc_sp   => "33.json",
+         test_inc_hlp  => "34.json",
+         test_dec_hlp  => "35.json",
+         test_ld_hlp_n => "36.json",
+         test_scf      => "37.json",
+         test_jr_c_d   => "38.json",
+         test_add_hl_sp=> "39.json",
+         test_ld_a_nnp => "3a.json",
+         test_dec_sp   => "3b.json",
+         test_inc_a    => "3c.json",
+         test_dec_a    => "3d.json",
+         test_ld_a_n   => "3e.json",
+         test_ccf      => "3f.json",
     }
 }
