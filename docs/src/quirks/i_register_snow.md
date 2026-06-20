@@ -1,4 +1,4 @@
-# The I Register Snow Bug
+# The I Register Snow Bug ("Rain" Effect)
 
 After each instruction fetch cycle, the Z80 places the I-R register pair (the interrupt vector register and memory refresh register) on the address bus. The lowest 7 bits (the R register) provide dynamic RAM refresh.
 

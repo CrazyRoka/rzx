@@ -1,5 +1,11 @@
 # Other Peripherals
 
+## 128K RS-232 Serial Port
+
+The ZX Spectrum 128 provides a software-controlled RS-232 serial interface through the expansion edge connector. It is bit-banged via the ULA's general-purpose I/O lines rather than a dedicated UART, so timing is tied to the CPU clock rate. The port is configured through control registers in the ROM and accessed using BASIC's `OPEN #` and stream commands for serial I/O.
+
+(TODO: document exact edge connector pin assignments for the serial signals)
+
 ## Multiface 1 / 128 / +3
 
 Developed by Romantic Robot, the Multiface connects to the Spectrum's edge connector and provides:

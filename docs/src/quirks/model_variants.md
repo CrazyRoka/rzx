@@ -36,7 +36,7 @@
 - Identical to 48K for emulation purposes.
 - 58-key keyboard.
 
-### 128K (1985, Sinclair)
+### 128K (1985, Sinclair — "Toastrack")
 - First model with 128 KB RAM and bank switching.
 - AY-3-8912 sound chip.
 - Numeric keypad with editing functions (58 keys total).
@@ -45,12 +45,17 @@
 - Built-in MIDI interface.
 - The I register snow bug also exists on this model, and additionally crashes the machine shortly after I is set to point to contended memory.
 - Port 0xFE bit 6 behaviour matches Issue 3.
+- **HAL10H8 read bug:** reading port `0x7FFD` crashes the machine (HAL does not distinguish reads from writes). Later +2s fix this.
+- **HAL10H8 contention bug:** contends banks 1, 3, 5, 7 (not 4, 5, 6, 7 as documented in the service manual) due to swapped inputs in the HAL.
 - Power supply: 9 V DC @ 1.85 A, centre -ve.
+- Nicknamed **"Toastrack"** for the large external heatsink on the right side.
 
-### +2 (1986, Amstrad)
+### +2 (1986, Amstrad — Grey)
 - 128K hardware in a grey case with built-in cassette deck.
 - Two built-in Sinclair-style joystick ports (non-standard pinout).
 - Timing and memory identical to 128K. No MIDI interface.
+- Keyboard: 58 plastic keys with metal springs over a plastic membrane.
+- PCB revisions: **Z70500** (Taiwan, earliest), **Z70700** (UK, later), **0500** (fixed HAL10H8 — reading port `0x7FFD` does not crash).
 - Power supply: 9 V DC @ 2.1 A, centre -ve.
 
 ### +3 (1987, Amstrad)
@@ -61,14 +66,29 @@
 - No floating bus — unused ports always return 255.
 - Port 0xFE is not contended.
 - Different contention pattern and combined instruction entries.
+- Motherboard: **Z70830** (ISSUE 1 & 2, ©1987), common with +2A.
+- Built-in Centronics parallel printer port (strobe via `0x1FFD` bit 4).
+- Software-controlled RS-232 serial port and AUX port on expansion connector.
 - Power supply: +5 V @ 2 A, +12 V @ 700 mA, -12 V @ 50 mA.
 
-### +2A / +2B (1987–88, Amstrad)
+### +2A (1987, Amstrad — Black)
 - +3 motherboard in a +2-style case, no disk drive.
+- Motherboard: **Z70830** (ISSUE 1 & 2, ©1987), common with +3.
+- The three disk controller signals from the gate array are present on the expansion port for an external FDC add-on (SI-1, planned but never released).
 - Same memory paging, timing, and contention as the +3.
 - Same port 0xFE and floating bus behaviour as the +3.
-- Black case (+2A) / darker grey (+2B).
-- +12 V rail: 200 mA (reduced from +3).
+- **Audio distortion:** the AY-3-8912 output circuit has a design flaw causing serious distortion (fixed in +2B).
+- Black case, +12 V rail: 200 mA (reduced from +3).
+
+### +2B (1988, Amstrad — Black)
+- Redesigned audio circuit fixing the +2A's AY-3-8912 distortion.
+- Motherboard: **Z70833** (ISSUE 1, 2 ©1988, ISSUE 4 ©1990). Stepped right edge for paneling.
+- Z70833 ISSUE 4 uses a different FM modulator circuit for audio output.
+- Many +2A cases actually contain a Z70833 board (Z70830 in +2A cases is rare).
+
+### +3B (1988, Amstrad)
+- Redesigned audio circuit fixing the +3's AY-3-8912 distortion.
+- Motherboard: **Z70835** (ISSUE 1, ©1988). No datacorder provision, external FDC signals remain on expansion port.
 
 ### NTSC Spectrum (1982, Sinclair — Chile)
 - Standard 48K Spectrum hardware sold in Chile.

@@ -16,6 +16,10 @@ The +3 uses a **NEC uPD765A** floppy disk controller (FDC). Later models may use
 
 An Amiga 3.5" drive can be attached by wiring the pins by name and providing external power. A public-domain formatter can format the disk to 720 KB.
 
+### External FDC (SI-1)
+
+The +2A's gate array exposes the three disk controller control signals on the expansion edge connector, allowing an external floppy disk controller to provide the omitted internal drive components. Amstrad planned to release this as the **SI-1** add-on, but it never went on sale.
+
 ## .DSK Format
 
 TODO: Document the .DSK disk image format — standard CPC-style format (track/sector/header layout), extended PC/MFM format, and the +3-specific formatting details.

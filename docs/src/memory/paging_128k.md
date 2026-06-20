@@ -51,7 +51,15 @@ The byte written is interpreted as follows:
 
 When memory is being paged, interrupts should be disabled and the stack should be in an area that is not going to change. If normal interrupt code is to run, the system variable at `0x5B5C` (23388) must be kept updated with the last value sent to port `0x7FFD`.
 
-Reading from `0x7FFD` returns floating bus values (no special result).
+### HAL10H8 Read Crash Bug
+
+On the original 128K (and some early +2s), reading from `0x7FFD` **crashes the machine**. The HAL10H8 chip does not distinguish between I/O reads and writes to this port — a read corrupts the paging registers with whatever value is on the data bus (typically floating bus data). The machine must be reset.
+
+Later grey +2s shipped with an updated HAL10H8 that distinguishes reads from writes. On these machines (and on +2A/+3), reading `0x7FFD` returns floating bus values without side effects.
+
+### HAL10H8 Contention Bug
+
+The HAL10H8 also decides which RAM banks are contended. Due to a bug — reversed B0 and B2 inputs either on the PCB or within the HAL itself — the original 128K contends banks **1, 3, 5, and 7** instead of the intended banks 4, 5, 6, and 7 (as documented in the service manual). The grey +2 inherits this same contention pattern. The +2A and +3 use a different gate array that contends banks 4, 5, 6, and 7 as originally intended.
 
 ### Example: Switching to Bank 4
 

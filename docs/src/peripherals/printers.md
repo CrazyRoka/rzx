@@ -1,5 +1,17 @@
 # Printers
 
+## +3 Parallel Printer Port
+
+The ZX Spectrum +3 has a built-in Centronics-compatible parallel printer port. The data lines are exposed on the expansion edge connector, and the **printer strobe** signal is controlled by **bit 4 of port `0x1FFD`** (see [128K Memory Paging](../memory/paging_128k.md)).
+
+| Port | Bit | Function |
+|---|---|---|
+| `0x1FFD` | 4 | Printer strobe (1 = strobe active, +3 only) |
+
+The strobe signal alone does not transmit data bytes — the 8 data lines are driven directly from the Z80's data bus during an OUT instruction to a yet-undocumented port. The +3 ROM and +3DOS contain the full printer driver routines.
+
+(TODO: confirm the I/O port used for printer data output)
+
 ## ZX Printer
 
 The ZX Printer (1981) is compatible with the ZX80 (with ROM upgrade), ZX81 and ZX Spectrum. It is a compact 32-column printer using aluminium-coated paper. The image is "burned" onto the paper by two metal pins — a voltage passed through the pins produces a spark that leaves a black dot.

@@ -22,3 +22,14 @@ The 128K model introduced editing functions accessible via key combinations usin
 | Delete to end of line | `[E]` J |
 
 Where `[E]` = Extended Mode and `[S]` = Symbol Shift.
+
+## Hardware Port
+
+The keypad connects to the 128K's edge connector. Two motherboard revisions differ in keypad compatibility:
+
+| Issue | Behaviour |
+|---|---|
+| **6K** | Provides incorrect voltage to the keypad — some UK keypads are incompatible. |
+| **6U** | Corrected by replacing resistor **R137**, providing the proper voltage. |
+
+Keypad signals map to the same keyboard matrix rows as the numeric key functions — the keypad hardware appears to the software as standard keypresses distinguishable from the main keyboard only by position.

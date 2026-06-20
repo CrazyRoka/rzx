@@ -2,6 +2,8 @@
 
 The Spectrum keyboard is a membrane-switch matrix arranged as 8 rows (driven by address lines A15–A8 through diodes) by 5 columns (read back on data lines D0–D4). The ULA drives one address line low at a time, and the returned nibble on D0–D4 indicates which keys in that row are pressed (0 = pressed).
 
+The original 16K/48K/Spectrum+ use a rubber-dome-over-membrane design (40 keys on 16K/48K, 58 on +). The **+2**, **+2A**, **+2B**, and **+3** use 58 plastic keys with **metal springs** over a plastic membrane, providing a different tactile feel.
+
 ## Physical Matrix Layout
 
 The keys are arranged on the membrane in the following physical layout:
