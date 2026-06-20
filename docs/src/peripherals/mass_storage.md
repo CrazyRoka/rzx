@@ -73,6 +73,36 @@ A modular disk system. The interface connects to the Spectrum's edge connector v
 
 Refer to the MGT Lifetime FAQ by Damien Guard for full technical details. Available from the usual Spectrum reference archives.
 
+## Beta 128 (TR-DOS)
+
+A floppy disk interface developed in Bulgaria, widely used in Eastern Europe and the Russian Spectrum scene. Runs the **TR-DOS** operating system.
+
+| Port | Function |
+|---|---|
+| `0x1F` | Command (OUT) / State (IN) |
+| `0x3F` | Track register |
+| `0x5F` | Sector register |
+| `0x7F` | Data register |
+| `0xFF` | System register |
+
+The Beta 128 response mask is `---- ---- 000- ----` for the command/state port, with the high nibble of the low byte selecting the function — see [I/O Port Map](../quirks/io_port_map.md).
+
+## +D (Disciple)
+
+A disk interface compatible with the Disciple and +D systems, supporting double-sided 3.5" drives and CP/M.
+
+| Port | Function |
+|---|---|
+| `0xE3` | Command (OUT) / State (IN) |
+| `0xE7` | Memory paging |
+| `0xEB` | Track register |
+| `0xEF` | System register |
+| `0xF3` | Sector register |
+| `0xF7` | Printer data / ready |
+| `0xFB` | Data register |
+
+The +D response mask uses bits 7–3 of the low byte for decoding — see [I/O Port Map](../quirks/io_port_map.md).
+
 ## Timex TS2020 Program Recorder
 
 A standard cassette recorder for Timex systems:

@@ -68,6 +68,7 @@
   - [EAR/MIC Circuit Delays](./quirks/ear_mic_delays.md)
   - [Model Detection](./quirks/model_detection.md)
   - [ZX Interface I & II](./quirks/zx_interface1.md)
+  - [I/O Port Map](./quirks/io_port_map.md)
 
 # Peripherals
 
@@ -75,6 +76,13 @@
 - [Mass Storage](./peripherals/mass_storage.md)
 - [Joystick Interfaces](./peripherals/joysticks.md)
 - [Other Peripherals](./peripherals/misc.md)
+
+# File Formats
+
+- [File Formats](./file_formats/README.md)
+  - [SNA Snapshot Format](./file_formats/sna_format.md)
+  - [SCR Screen Format](./file_formats/scr_format.md)
+  - [MDR Microdrive Format](./file_formats/mdr_format.md)
 
 # Appendix
 

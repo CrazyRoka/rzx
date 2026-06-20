@@ -6,16 +6,40 @@ The ZX Spectrum 128 provides a software-controlled RS-232 serial interface throu
 
 (TODO: document exact edge connector pin assignments for the serial signals)
 
-## Multiface 1 / 128 / +3
+## Multiface 1
 
-Developed by Romantic Robot, the Multiface connects to the Spectrum's edge connector and provides:
+The original model for 48K Spectrums:
 
-- A Kempston-compatible joystick port
-- 8 KB EPROM + 8 KB RAM (Multiface 1: 2 KB RAM)
-- The ability to freeze a running program and save it to tape, Microdrive, disk, or Wafadrive
-- In-memory inspection and patching
+| Function | Port |
+|---|---|
+| Read freeze state / ID | IN `0x9F` |
+| Write control | OUT `0x1F` |
 
-Saved programs can be compressed and reloaded without a Multiface attached.
+Includes a Kempston-compatible joystick port, 2 KB RAM, 8 KB EPROM. Freezes the running program, allows saving to tape/Microdrive/Wafadrive.
+
+## Multiface 128
+
+For 128K and +2 models:
+
+| Function | Port |
+|---|---|
+| Read freeze state / ID | IN `0xBF` (or `0x9F` for Disciple compatibility) |
+| Write control | OUT `0x3F` |
+
+8 KB RAM + 8 KB EPROM. Handles the 128K paging system correctly.
+
+## Multiface 3
+
+For +3 models:
+
+| Function | Port |
+|---|---|
+| Read freeze state / button | IN `0x3F` |
+| Write control | OUT `0xBF` |
+| Trap port `0x7FFD` | `0x7F3F` |
+| Trap port `0x1FFD` | `0x1F3F` |
+
+Supports the +3's dual paging ports and can intercept writes to pages being swapped.
 
 ## Currah µSpeech
 

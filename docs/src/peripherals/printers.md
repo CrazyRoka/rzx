@@ -8,9 +8,7 @@ The ZX Spectrum +3 has a built-in Centronics-compatible parallel printer port. T
 |---|---|---|
 | `0x1FFD` | 4 | Printer strobe (1 = strobe active, +3 only) |
 
-The strobe signal alone does not transmit data bytes — the 8 data lines are driven directly from the Z80's data bus during an OUT instruction to a yet-undocumented port. The +3 ROM and +3DOS contain the full printer driver routines.
-
-(TODO: confirm the I/O port used for printer data output)
+The strobe signal alone does not transmit data bytes — the 8 data lines are driven directly from the Z80's data bus during an OUT instruction. The +3 Centronics interface responds to any port matching the mask `0000 ---- ---- --0-` (bits 15–12 = 0, bit 1 = 0). The exact canonical port is not confirmed, but the +3 ROM and +3DOS contain the full printer driver routines with the specific address.
 
 ## ZX Printer
 

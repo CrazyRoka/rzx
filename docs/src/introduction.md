@@ -13,7 +13,7 @@ This minimalist core remained at the heart of the family even as later models ad
 This book covers the following ZX Spectrum models:
 
 | Model | Year | CPU | ROM | RAM | Key Differences |
-|---|---|---|---|---|---|---|
+|---|---|---|---|---|---|
 | 16K | 1982 | 3.5 MHz | 16 KB | 16 KB | Original |
 | 48K | 1982 | 3.5 MHz | 16 KB | 48 KB | Baseline reference model |
 | Spectrum+ | 1984 | 3.5 MHz | 16 KB | 48 KB | New keyboard case, reset button |
