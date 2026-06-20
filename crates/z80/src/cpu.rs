@@ -17,8 +17,10 @@ struct Z80 {
     f: u8,
     h: u8,
     l: u8,
-    // w: u8
-    // z: u8
+    i: u8,
+    r: u8,
+    w: u8,
+    z: u8,
     q: u8,
     a_shadow: u8,
     b_shadow: u8,
@@ -28,12 +30,13 @@ struct Z80 {
     f_shadow: u8,
     h_shadow: u8,
     l_shadow: u8,
-    // w_shadow: u8
-    // z_shadow: u8
+    w_shadow: u8,
+    z_shadow: u8,
     pc: u16,
     sp: u16,
     ix: u16,
     iy: u16,
+    ei: bool,
 }
 
 impl Z80 {
@@ -43,6 +46,8 @@ impl Z80 {
 
     pub fn execute<B: Bus>(&mut self, bus: &mut B) -> u64 {
         let opcode = self.read_byte(bus);
+        self.r = (((self.r & 0x7F) + 1) & 0x7F) | (self.r & 0x80);
+        self.ei = false;
         let old_f = self.f;
         let old_q = self.q;
         let cycles = self.step(bus, opcode);
@@ -91,6 +96,15 @@ impl Z80 {
     fn set_hl(&mut self, value: u16) {
         self.h = (value >> 8) as u8;
         self.l = (value & 0xFF) as u8;
+    }
+
+    fn wz(&self) -> u16 {
+        ((self.w as u16) << 8) | (self.z as u16)
+    }
+
+    fn set_wz(&mut self, value: u16) {
+        self.w = (value >> 8) as u8;
+        self.z = (value & 0xFF) as u8;
     }
 
     fn get_rp(&self, idx: u8) -> u16 {
@@ -187,6 +201,7 @@ impl Z80 {
             | if carry { FLAG_CARRY } else { 0 }
             | ((result >> 8) & 0x28) as u8;
         self.q = !self.q;
+        self.set_wz(hl.wrapping_add(1));
         self.set_hl(result);
     }
 
@@ -241,6 +256,8 @@ impl Z80 {
             } // LD BC,nn
             0x02 => {
                 bus.write(self.bc(), self.a);
+                self.w = self.a;
+                self.z = self.c.wrapping_add(1);
                 7
             } // LD (BC),A
             0x03 => {
@@ -279,6 +296,7 @@ impl Z80 {
             } // ADD HL,BC
             0x0A => {
                 self.a = bus.read(self.bc());
+                self.set_wz(self.bc().wrapping_add(1));
                 7
             } // LD A,(BC)
             0x0B => {
@@ -311,6 +329,7 @@ impl Z80 {
                 let displacement = self.read_byte(bus) as i8 as u16;
                 if self.b != 0 {
                     self.pc = self.pc.wrapping_add(displacement);
+                    self.set_wz(self.pc);
                     13
                 } else {
                     8
@@ -323,6 +342,8 @@ impl Z80 {
             } // LD DE,nn
             0x12 => {
                 bus.write(self.de(), self.a);
+                self.w = self.a;
+                self.z = self.e.wrapping_add(1);
                 7
             } // LD (DE),A
             0x13 => {
@@ -354,6 +375,7 @@ impl Z80 {
                 // JR d
                 let displacement = self.read_byte(bus) as i8 as u16;
                 self.pc = self.pc.wrapping_add(displacement);
+                self.set_wz(self.pc);
                 12
             }
             0x19 => {
@@ -362,6 +384,7 @@ impl Z80 {
             } // ADD HL,DE
             0x1A => {
                 self.a = bus.read(self.de());
+                self.set_wz(self.de().wrapping_add(1));
                 7
             } // LD A,(DE)
             0x1B => {
@@ -394,6 +417,7 @@ impl Z80 {
                 let displacement = self.read_byte(bus) as i8 as u16;
                 if self.f & FLAG_ZERO == 0 {
                     self.pc = self.pc.wrapping_add(displacement);
+                    self.set_wz(self.pc);
                     12
                 } else {
                     7
@@ -409,6 +433,7 @@ impl Z80 {
                 let addr = self.read_word(bus);
                 bus.write(addr, self.l);
                 bus.write(addr.wrapping_add(1), self.h);
+                self.set_wz(addr.wrapping_add(1));
                 16
             }
             0x23 => {
@@ -436,6 +461,7 @@ impl Z80 {
                 let displacement = self.read_byte(bus) as i8 as u16;
                 if self.f & FLAG_ZERO != 0 {
                     self.pc = self.pc.wrapping_add(displacement);
+                    self.set_wz(self.pc);
                     12
                 } else {
                     7
@@ -450,6 +476,7 @@ impl Z80 {
                 let addr = self.read_word(bus);
                 self.l = bus.read(addr);
                 self.h = bus.read(addr.wrapping_add(1));
+                self.set_wz(addr.wrapping_add(1));
                 16
             }
             0x2B => {
@@ -483,6 +510,7 @@ impl Z80 {
                 let displacement = self.read_byte(bus) as i8 as u16;
                 if self.f & FLAG_CARRY == 0 {
                     self.pc = self.pc.wrapping_add(displacement);
+                    self.set_wz(self.pc);
                     12
                 } else {
                     7
@@ -496,6 +524,8 @@ impl Z80 {
                 // LD (nn),A
                 let addr = self.read_word(bus);
                 bus.write(addr, self.a);
+                self.w = self.a;
+                self.z = (addr.wrapping_add(1) & 0xFF) as u8;
                 13
             }
             0x33 => {
@@ -537,6 +567,7 @@ impl Z80 {
                 let displacement = self.read_byte(bus) as i8 as u16;
                 if self.f & FLAG_CARRY != 0 {
                     self.pc = self.pc.wrapping_add(displacement);
+                    self.set_wz(self.pc);
                     12
                 } else {
                     7
@@ -550,6 +581,7 @@ impl Z80 {
                 // LD A,(nn)
                 let addr = self.read_word(bus);
                 self.a = bus.read(addr);
+                self.set_wz(addr.wrapping_add(1));
                 13
             }
             0x3B => {
@@ -619,10 +651,10 @@ mod tests {
         f: u8,
         h: u8,
         l: u8,
-        // "i": 62,
-        // "r": 0,
-        // "ei": 0,
-        // "wz": 6102,
+        i: u8,
+        r: u8,
+        ei: u8,
+        wz: u16,
         ix: u16,
         iy: u16,
         af_: u16,
@@ -649,6 +681,10 @@ mod tests {
             cpu.f = self.f;
             cpu.h = self.h;
             cpu.l = self.l;
+            cpu.i = self.i;
+            cpu.r = self.r;
+            cpu.w = (self.wz >> 8) as u8;
+            cpu.z = (self.wz & 0xFF) as u8;
             cpu.q = self.q;
             cpu.ix = self.ix;
             cpu.iy = self.iy;
@@ -662,6 +698,7 @@ mod tests {
             cpu.l_shadow = (self.hl_ & 0xFF) as u8;
             cpu.pc = self.pc;
             cpu.sp = self.sp;
+            cpu.ei = self.ei == 1;
 
             cpu
         }
