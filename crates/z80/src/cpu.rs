@@ -64,7 +64,7 @@ impl Z80 {
         let old_f = self.f;
         let old_q = self.q;
         let cycles = self.step(bus, opcode);
-        self.q = if (old_f != self.f || old_q != self.q) && opcode != 0x08 {
+        self.q = if (old_f != self.f || old_q != self.q) && opcode != 0x08 && opcode != 0xF1 {
             self.f
         } else {
             0
@@ -216,6 +216,37 @@ impl Z80 {
         self.q = !self.q;
         self.set_wz(hl.wrapping_add(1));
         self.set_hl(result);
+    }
+
+    fn check_cc(&self, cc: u8) -> bool {
+        match cc {
+            0 => self.f & FLAG_ZERO == 0,   // NZ
+            1 => self.f & FLAG_ZERO != 0,   // Z
+            2 => self.f & FLAG_CARRY == 0,  // NC
+            3 => self.f & FLAG_CARRY != 0,  // C
+            4 => self.f & FLAG_PARITY == 0, // PO (parity odd)
+            5 => self.f & FLAG_PARITY != 0, // PE (parity even)
+            6 => self.f & FLAG_SIGN == 0,   // P (positive)
+            7 => self.f & FLAG_SIGN != 0,   // M (minus)
+            _ => unreachable!(),
+        }
+    }
+
+    fn push_word<B: Bus>(&mut self, bus: &mut B, value: u16) {
+        let hi = (value >> 8) as u8;
+        let lo = (value & 0xFF) as u8;
+        self.sp = self.sp.wrapping_sub(1);
+        bus.write(self.sp, hi);
+        self.sp = self.sp.wrapping_sub(1);
+        bus.write(self.sp, lo);
+    }
+
+    fn pop_word<B: Bus>(&mut self, bus: &mut B) -> u16 {
+        let lo = bus.read(self.sp) as u16;
+        self.sp = self.sp.wrapping_add(1);
+        let hi = bus.read(self.sp) as u16;
+        self.sp = self.sp.wrapping_add(1);
+        (hi << 8) | lo
     }
 
     fn add_a(&mut self, value: u8, with_carry: bool) {
@@ -724,7 +755,239 @@ impl Z80 {
                 }
                 if src == 6 { 7 } else { 4 }
             }
-
+            // RET cc
+            0xC0 | 0xC8 | 0xD0 | 0xD8 | 0xE0 | 0xE8 | 0xF0 | 0xF8 => {
+                let cc = (opcode >> 3) & 7;
+                if self.check_cc(cc) {
+                    let pc = self.pop_word(bus);
+                    self.pc = pc;
+                    self.set_wz(pc);
+                    11
+                } else {
+                    5
+                }
+            }
+            0xC1 => {
+                // POP BC
+                let word = self.pop_word(bus);
+                self.set_bc(word);
+                10
+            }
+            // JP cc,nn
+            0xC2 | 0xCA | 0xD2 | 0xDA | 0xE2 | 0xEA | 0xF2 | 0xFA => {
+                let cc = (opcode >> 3) & 7;
+                let addr = self.read_word(bus);
+                self.set_wz(addr);
+                if self.check_cc(cc) {
+                    self.pc = addr;
+                }
+                10
+            }
+            0xC3 => {
+                // JP nn
+                let addr = self.read_word(bus);
+                self.pc = addr;
+                self.set_wz(addr);
+                10
+            }
+            // CALL cc,nn
+            0xC4 | 0xCC | 0xD4 | 0xDC | 0xE4 | 0xEC | 0xF4 | 0xFC => {
+                let cc = (opcode >> 3) & 7;
+                let addr = self.read_word(bus);
+                self.set_wz(addr);
+                if self.check_cc(cc) {
+                    self.push_word(bus, self.pc);
+                    self.pc = addr;
+                    17
+                } else {
+                    10
+                }
+            }
+            0xC5 => {
+                // PUSH BC
+                self.push_word(bus, self.bc());
+                11
+            }
+            0xC6 => {
+                // ADD A,n
+                let n = self.read_byte(bus);
+                self.add_a(n, false);
+                7
+            }
+            // RST p
+            0xC7 | 0xCF | 0xD7 | 0xDF | 0xE7 | 0xEF | 0xF7 | 0xFF => {
+                let addr = (opcode & 0x38) as u16;
+                self.push_word(bus, self.pc);
+                self.pc = addr;
+                self.set_wz(addr);
+                11
+            }
+            0xC9 => {
+                // RET
+                let pc = self.pop_word(bus);
+                self.pc = pc;
+                self.set_wz(pc);
+                10
+            }
+            0xCB => panic!("CB prefix not implemented"),
+            0xCD => {
+                // CALL nn
+                let addr = self.read_word(bus);
+                self.push_word(bus, self.pc);
+                self.pc = addr;
+                self.set_wz(addr);
+                17
+            }
+            0xCE => {
+                // ADC A,n
+                let n = self.read_byte(bus);
+                self.add_a(n, true);
+                7
+            }
+            0xD1 => {
+                // POP DE
+                let word = self.pop_word(bus);
+                self.set_de(word);
+                10
+            }
+            0xD3 => {
+                // OUT (n),A
+                let n = self.read_byte(bus);
+                let port = ((self.a as u16) << 8) | n as u16;
+                self.set_wz(((self.a as u16) << 8) | n.wrapping_add(1) as u16);
+                bus.port_write(port, self.a);
+                11
+            }
+            0xD5 => {
+                // PUSH DE
+                self.push_word(bus, self.de());
+                11
+            }
+            0xD6 => {
+                // SUB n
+                let n = self.read_byte(bus);
+                self.sub_a(n, false, true);
+                7
+            }
+            0xD9 => {
+                // EXX
+                std::mem::swap(&mut self.b, &mut self.b_shadow);
+                std::mem::swap(&mut self.c, &mut self.c_shadow);
+                std::mem::swap(&mut self.d, &mut self.d_shadow);
+                std::mem::swap(&mut self.e, &mut self.e_shadow);
+                std::mem::swap(&mut self.h, &mut self.h_shadow);
+                std::mem::swap(&mut self.l, &mut self.l_shadow);
+                4
+            }
+            0xDB => {
+                // IN A,(n)
+                let n = self.read_byte(bus);
+                let port = ((self.a as u16) << 8) | n as u16;
+                self.set_wz(port.wrapping_add(1));
+                self.a = bus.port_read(port);
+                11
+            }
+            0xDD => panic!("DD prefix not implemented"),
+            0xDE => {
+                // SBC A,n
+                let n = self.read_byte(bus);
+                self.sub_a(n, true, true);
+                7
+            }
+            0xE1 => {
+                // POP HL
+                let word = self.pop_word(bus);
+                self.set_hl(word);
+                10
+            }
+            0xE3 => {
+                // EX (SP),HL
+                let sp = self.sp;
+                let old_l = self.l;
+                let old_h = self.h;
+                self.l = bus.read(sp);
+                self.h = bus.read(sp.wrapping_add(1));
+                bus.write(sp, old_l);
+                bus.write(sp.wrapping_add(1), old_h);
+                self.set_wz(self.hl());
+                19
+            }
+            0xE5 => {
+                // PUSH HL
+                self.push_word(bus, self.hl());
+                11
+            }
+            0xE6 => {
+                // AND n
+                let n = self.read_byte(bus);
+                self.and_a(n);
+                7
+            }
+            0xE9 => {
+                // JP (HL)
+                self.pc = self.hl();
+                4
+            }
+            0xEB => {
+                // EX DE,HL
+                let de = self.de();
+                let hl = self.hl();
+                self.set_de(hl);
+                self.set_hl(de);
+                4
+            }
+            0xED => panic!("ED prefix not implemented"),
+            0xEE => {
+                // XOR n
+                let n = self.read_byte(bus);
+                self.xor_a(n);
+                7
+            }
+            0xF1 => {
+                // POP AF
+                let word = self.pop_word(bus);
+                self.a = (word >> 8) as u8;
+                self.f = (word & 0xFF) as u8;
+                //
+                10
+            }
+            0xF3 => {
+                // DI
+                self.iff1 = false;
+                self.iff2 = false;
+                4
+            }
+            0xF5 => {
+                // PUSH AF
+                let word = ((self.a as u16) << 8) | (self.f as u16);
+                self.push_word(bus, word);
+                11
+            }
+            0xF6 => {
+                // OR n
+                let n = self.read_byte(bus);
+                self.or_a(n);
+                7
+            }
+            0xF9 => {
+                // LD SP,HL
+                self.sp = self.hl();
+                6
+            }
+            0xFB => {
+                // EI
+                self.iff1 = true;
+                self.iff2 = true;
+                self.ei = true;
+                4
+            }
+            0xFD => panic!("FD prefix not implemented"),
+            0xFE => {
+                // CP n
+                let n = self.read_byte(bus);
+                self.sub_a(n, false, false);
+                7
+            }
             _ => panic!("Unexpected opcode {opcode:02X}"),
         }
     }
@@ -741,6 +1004,7 @@ mod tests {
     #[derive(Default, PartialEq, Eq, Debug)]
     struct TestBus {
         memory: HashMap<u16, u8>,
+        port_inputs: HashMap<u16, u8>,
     }
 
     impl Bus for TestBus {
@@ -750,6 +1014,14 @@ mod tests {
 
         fn write(&mut self, addr: u16, value: u8) {
             self.memory.insert(addr, value);
+        }
+
+        fn port_read(&self, port: u16) -> u8 {
+            *self.port_inputs.get(&port).unwrap_or(&0xFF)
+        }
+
+        fn port_write(&mut self, port: u16, value: u8) {
+            self.port_inputs.insert(port, value);
         }
     }
 
@@ -842,11 +1114,15 @@ mod tests {
             cpu
         }
 
-        fn create_memory(&self) -> TestBus {
+        fn create_memory(&self, ports: Vec<(u16, u8, String)>) -> TestBus {
             let mut bus = TestBus::default();
 
             for (addr, value) in self.ram.iter() {
                 bus.write(*addr, *value);
+            }
+
+            for (port, value, _) in ports.iter() {
+                bus.port_write(*port, *value);
             }
 
             bus
@@ -862,7 +1138,7 @@ mod tests {
         #[serde(rename = "final")]
         final_state: TestCaseState,
         cycles: Vec<(u16, Option<u8>, String)>,
-        // ports: Vec<(u16, Option<u8>, String)>,
+        ports: Option<Vec<(u16, u8, String)>>,
     }
 
     macro_rules! z80_tests {
@@ -885,7 +1161,14 @@ mod tests {
             serde_json::from_str(&test_cases_string).expect("Test case file failed to deserialize");
 
         for case in test_cases {
-            let mut bus = case.initial_state.create_memory();
+            let initial_ports_state = case.ports.clone().map_or(Vec::default(), |ports| {
+                ports
+                    .iter()
+                    .filter(|(_, _, op)| op == "r")
+                    .cloned()
+                    .collect()
+            });
+            let mut bus = case.initial_state.create_memory(initial_ports_state);
             let mut cpu = case.initial_state.create_cpu();
 
             let cycles = cpu.execute(&mut bus);
@@ -897,9 +1180,10 @@ mod tests {
                 case.name
             );
             assert_eq!(
-                case.final_state.create_memory(),
+                case.final_state
+                    .create_memory(case.ports.unwrap_or_default()),
                 bus,
-                "Test Case '{}': RAM state doesn't match the expected final state",
+                "Test Case '{}': RAM and PORTS state doesn't match the expected final state",
                 case.name
             );
             assert_eq!(
@@ -1104,5 +1388,69 @@ mod tests {
          test_cp_l      => "bd.json",
          test_cp_hlp    => "be.json",
          test_cp_a      => "bf.json",
+         test_ret_nz     => "c0.json",
+         test_pop_bc     => "c1.json",
+         test_jp_nz_nn   => "c2.json",
+         test_jp_nn      => "c3.json",
+         test_call_nz_nn => "c4.json",
+         test_push_bc    => "c5.json",
+         test_add_a_n    => "c6.json",
+         test_rst_00     => "c7.json",
+         test_ret_z      => "c8.json",
+         test_ret        => "c9.json",
+         test_jp_z_nn    => "ca.json",
+         // TODO: handle CB
+         test_call_z_nn  => "cc.json",
+         test_call_nn    => "cd.json",
+         test_adc_a_n    => "ce.json",
+         test_rst_08     => "cf.json",
+         test_ret_nc     => "d0.json",
+         test_pop_de     => "d1.json",
+         test_jp_nc_nn   => "d2.json",
+         test_out_n_a    => "d3.json",
+         test_call_nc_nn => "d4.json",
+         test_push_de    => "d5.json",
+         test_sub_n      => "d6.json",
+         test_rst_10     => "d7.json",
+         test_ret_c      => "d8.json",
+         test_exx        => "d9.json",
+         test_jp_c_nn    => "da.json",
+         test_in_a_n     => "db.json",
+         test_call_c_nn  => "dc.json",
+         // TODO: handle dd
+         test_sbc_a_n    => "de.json",
+         test_rst_18     => "df.json",
+         test_ret_po     => "e0.json",
+         test_pop_hl     => "e1.json",
+         test_jp_po_nn   => "e2.json",
+         test_ex_spp_hl  => "e3.json",
+         test_call_po_nn => "e4.json",
+         test_push_hl    => "e5.json",
+         test_and_n      => "e6.json",
+         test_rst_20     => "e7.json",
+         test_ret_pe     => "e8.json",
+         test_jp_hlp     => "e9.json",
+         test_jp_pe_nn   => "ea.json",
+         test_ex_de_hl   => "eb.json",
+         test_call_pe_nn => "ec.json",
+         // TODO: handle ed
+         test_xor_n      => "ee.json",
+         test_rst_28     => "ef.json",
+         test_ret_p      => "f0.json",
+         test_pop_af     => "f1.json",
+         test_jp_p_nn    => "f2.json",
+         test_di         => "f3.json",
+         test_call_p_nn  => "f4.json",
+         test_push_af    => "f5.json",
+         test_or_n       => "f6.json",
+         test_rst_30     => "f7.json",
+         test_ret_m      => "f8.json",
+         test_ld_sp_hl   => "f9.json",
+         test_jp_m_nn    => "fa.json",
+         test_ei         => "fb.json",
+         test_call_m_nn  => "fc.json",
+         // TODO: handle FD
+         test_cp_n       => "fe.json",
+         test_rst_38     => "ff.json",
     }
 }
