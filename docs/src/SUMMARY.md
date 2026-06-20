@@ -28,6 +28,7 @@
   - [Attributes & Flashing](./ula/attributes.md)
   - [The Floating Bus](./ula/floating_bus.md)
   - [Contended I/O](./ula/contended_io.md)
+  - [Video Output](./ula/video_output.md)
 
 # Input
 
@@ -73,4 +74,5 @@
   - [Z80 CPU Tests (ZEXALL/ZEXDOC)](./testing/z80_tests.md)
   - [ULA & Timing Tests (Fusetest)](./testing/fusetest.md)
   - [Real-World Game Tests](./testing/game_tests.md)
+- [Power Supplies](./appendix/power_supplies.md)
 - [Appendix: FAQ & References](./appendix/faq_reference.md)
