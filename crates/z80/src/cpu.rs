@@ -126,7 +126,7 @@ impl Z80 {
             1 => self.de(),
             2 => self.hl(),
             3 => self.sp,
-            _ => unreachable!(),
+            _ => panic!("Unexpected index {idx}"),
         }
     }
 
@@ -136,7 +136,7 @@ impl Z80 {
             1 => self.set_de(value),
             2 => self.set_hl(value),
             3 => self.sp = value,
-            _ => unreachable!(),
+            _ => panic!("Unexpected index {idx}"),
         }
     }
 
@@ -150,7 +150,7 @@ impl Z80 {
             5 => self.l,
             6 => bus.read(self.hl()),
             7 => self.a,
-            _ => unreachable!(),
+            _ => panic!("Unexpected index {idx}"),
         }
     }
 
@@ -164,7 +164,7 @@ impl Z80 {
             5 => self.l = value,
             6 => bus.write(self.hl(), value),
             7 => self.a = value,
-            _ => unreachable!(),
+            _ => panic!("Unexpected index {idx}"),
         }
     }
 
@@ -228,7 +228,7 @@ impl Z80 {
             5 => self.f & FLAG_PARITY != 0, // PE (parity even)
             6 => self.f & FLAG_SIGN == 0,   // P (positive)
             7 => self.f & FLAG_SIGN != 0,   // M (minus)
-            _ => unreachable!(),
+            _ => panic!("Unexpected cc {cc}"),
         }
     }
 
@@ -751,7 +751,7 @@ impl Z80 {
                     5 => self.xor_a(val),               // XOR
                     6 => self.or_a(val),                // OR
                     7 => self.sub_a(val, false, false), // CP
-                    _ => unreachable!(),
+                    _ => panic!("Unexpected OP {op}"),
                 }
                 if src == 6 { 7 } else { 4 }
             }
@@ -829,7 +829,7 @@ impl Z80 {
                 self.set_wz(pc);
                 10
             }
-            0xCB => panic!("CB prefix not implemented"),
+            0xCB => self.step_cb(bus),
             0xCD => {
                 // CALL nn
                 let addr = self.read_word(bus);
@@ -990,6 +990,109 @@ impl Z80 {
             }
             _ => panic!("Unexpected opcode {opcode:02X}"),
         }
+    }
+    fn step_cb<B: Bus>(&mut self, bus: &mut B) -> u64 {
+        let opcode = self.read_byte(bus);
+        self.r = (((self.r & 0x7F) + 1) & 0x7F) | (self.r & 0x80);
+        let op = opcode >> 6;
+        let sub = (opcode >> 3) & 7;
+        let reg = opcode & 7;
+        let is_hl = reg == 6;
+
+        let cycles = match op {
+            0 => {
+                // Rotate/shift
+                let value = self.get_reg(bus, reg);
+                let (result, carry) = match sub {
+                    0 => {
+                        // RLC
+                        let c = value >> 7;
+                        ((value << 1) | c, c)
+                    }
+                    1 => {
+                        // RRC
+                        let c = value & 1;
+                        ((value >> 1) | (c << 7), c)
+                    }
+                    2 => {
+                        // RL
+                        let old_c = if self.f & FLAG_CARRY != 0 { 1 } else { 0 };
+                        let new_c = value >> 7;
+                        ((value << 1) | old_c, new_c)
+                    }
+                    3 => {
+                        // RR
+                        let old_c = if self.f & FLAG_CARRY != 0 { 0x80 } else { 0 };
+                        let new_c = value & 1;
+                        ((value >> 1) | old_c, new_c)
+                    }
+                    4 => {
+                        // SLA
+                        let new_c = value >> 7;
+                        (value << 1, new_c)
+                    }
+                    5 => {
+                        // SRA
+                        let new_c = value & 1;
+                        ((value >> 1) | (value & 0x80), new_c)
+                    }
+                    6 => {
+                        // SLL (undocumented)
+                        let new_c = value >> 7;
+                        ((value << 1) | 1, new_c)
+                    }
+                    7 => {
+                        // SRL
+                        let new_c = value & 1;
+                        (value >> 1, new_c)
+                    }
+                    _ => panic!("Unexpected sub {sub}"),
+                };
+                self.f = if result == 0 { FLAG_ZERO } else { 0 }
+                    | if result & 0x80 != 0 { FLAG_SIGN } else { 0 }
+                    | if Self::parity(result) { FLAG_PARITY } else { 0 }
+                    | carry
+                    | (result & 0x28);
+                self.q = !self.q;
+                self.set_reg(bus, reg, result);
+                if is_hl { 15 } else { 8 }
+            }
+            1 => {
+                // BIT n, r
+                let value = self.get_reg(bus, reg);
+                let bit = sub;
+                let test = value & (1 << bit);
+                let xy_source = if is_hl { (self.wz() >> 8) as u8 } else { value };
+                self.f = (self.f & FLAG_CARRY)
+                    | FLAG_HALF_CARRY
+                    | if test == 0 {
+                        FLAG_ZERO | FLAG_PARITY
+                    } else {
+                        0
+                    }
+                    | if bit == 7 && test != 0 { FLAG_SIGN } else { 0 }
+                    | (xy_source & 0x28);
+                self.q = !self.q;
+                if is_hl { 12 } else { 8 }
+            }
+            2 => {
+                // RES n, r
+                let value = self.get_reg(bus, reg);
+                let result = value & !(1 << sub);
+                self.set_reg(bus, reg, result);
+                if is_hl { 15 } else { 8 }
+            }
+            3 => {
+                // SET n, r
+                let value = self.get_reg(bus, reg);
+                let result = value | (1 << sub);
+                self.set_reg(bus, reg, result);
+                if is_hl { 15 } else { 8 }
+            }
+            _ => panic!("Unexpected op {op}"),
+        };
+
+        cycles
     }
 }
 
@@ -1399,7 +1502,6 @@ mod tests {
          test_ret_z      => "c8.json",
          test_ret        => "c9.json",
          test_jp_z_nn    => "ca.json",
-         // TODO: handle CB
          test_call_z_nn  => "cc.json",
          test_call_nn    => "cd.json",
          test_adc_a_n    => "ce.json",
@@ -1452,5 +1554,72 @@ mod tests {
          // TODO: handle FD
          test_cp_n       => "fe.json",
          test_rst_38     => "ff.json",
+    }
+
+    z80_tests! {
+        test_cb_00 => "cb 00.json", test_cb_01 => "cb 01.json", test_cb_02 => "cb 02.json", test_cb_03 => "cb 03.json",
+        test_cb_04 => "cb 04.json", test_cb_05 => "cb 05.json", test_cb_06 => "cb 06.json", test_cb_07 => "cb 07.json",
+        test_cb_08 => "cb 08.json", test_cb_09 => "cb 09.json", test_cb_0a => "cb 0a.json", test_cb_0b => "cb 0b.json",
+        test_cb_0c => "cb 0c.json", test_cb_0d => "cb 0d.json", test_cb_0e => "cb 0e.json", test_cb_0f => "cb 0f.json",
+        test_cb_10 => "cb 10.json", test_cb_11 => "cb 11.json", test_cb_12 => "cb 12.json", test_cb_13 => "cb 13.json",
+        test_cb_14 => "cb 14.json", test_cb_15 => "cb 15.json", test_cb_16 => "cb 16.json", test_cb_17 => "cb 17.json",
+        test_cb_18 => "cb 18.json", test_cb_19 => "cb 19.json", test_cb_1a => "cb 1a.json", test_cb_1b => "cb 1b.json",
+        test_cb_1c => "cb 1c.json", test_cb_1d => "cb 1d.json", test_cb_1e => "cb 1e.json", test_cb_1f => "cb 1f.json",
+        test_cb_20 => "cb 20.json", test_cb_21 => "cb 21.json", test_cb_22 => "cb 22.json", test_cb_23 => "cb 23.json",
+        test_cb_24 => "cb 24.json", test_cb_25 => "cb 25.json", test_cb_26 => "cb 26.json", test_cb_27 => "cb 27.json",
+        test_cb_28 => "cb 28.json", test_cb_29 => "cb 29.json", test_cb_2a => "cb 2a.json", test_cb_2b => "cb 2b.json",
+        test_cb_2c => "cb 2c.json", test_cb_2d => "cb 2d.json", test_cb_2e => "cb 2e.json", test_cb_2f => "cb 2f.json",
+        test_cb_30 => "cb 30.json", test_cb_31 => "cb 31.json", test_cb_32 => "cb 32.json", test_cb_33 => "cb 33.json",
+        test_cb_34 => "cb 34.json", test_cb_35 => "cb 35.json", test_cb_36 => "cb 36.json", test_cb_37 => "cb 37.json",
+        test_cb_38 => "cb 38.json", test_cb_39 => "cb 39.json", test_cb_3a => "cb 3a.json", test_cb_3b => "cb 3b.json",
+        test_cb_3c => "cb 3c.json", test_cb_3d => "cb 3d.json", test_cb_3e => "cb 3e.json", test_cb_3f => "cb 3f.json",
+        test_cb_40 => "cb 40.json", test_cb_41 => "cb 41.json", test_cb_42 => "cb 42.json", test_cb_43 => "cb 43.json",
+        test_cb_44 => "cb 44.json", test_cb_45 => "cb 45.json", test_cb_46 => "cb 46.json", test_cb_47 => "cb 47.json",
+        test_cb_48 => "cb 48.json", test_cb_49 => "cb 49.json", test_cb_4a => "cb 4a.json", test_cb_4b => "cb 4b.json",
+        test_cb_4c => "cb 4c.json", test_cb_4d => "cb 4d.json", test_cb_4e => "cb 4e.json", test_cb_4f => "cb 4f.json",
+        test_cb_50 => "cb 50.json", test_cb_51 => "cb 51.json", test_cb_52 => "cb 52.json", test_cb_53 => "cb 53.json",
+        test_cb_54 => "cb 54.json", test_cb_55 => "cb 55.json", test_cb_56 => "cb 56.json", test_cb_57 => "cb 57.json",
+        test_cb_58 => "cb 58.json", test_cb_59 => "cb 59.json", test_cb_5a => "cb 5a.json", test_cb_5b => "cb 5b.json",
+        test_cb_5c => "cb 5c.json", test_cb_5d => "cb 5d.json", test_cb_5e => "cb 5e.json", test_cb_5f => "cb 5f.json",
+        test_cb_60 => "cb 60.json", test_cb_61 => "cb 61.json", test_cb_62 => "cb 62.json", test_cb_63 => "cb 63.json",
+        test_cb_64 => "cb 64.json", test_cb_65 => "cb 65.json", test_cb_66 => "cb 66.json", test_cb_67 => "cb 67.json",
+        test_cb_68 => "cb 68.json", test_cb_69 => "cb 69.json", test_cb_6a => "cb 6a.json", test_cb_6b => "cb 6b.json",
+        test_cb_6c => "cb 6c.json", test_cb_6d => "cb 6d.json", test_cb_6e => "cb 6e.json", test_cb_6f => "cb 6f.json",
+        test_cb_70 => "cb 70.json", test_cb_71 => "cb 71.json", test_cb_72 => "cb 72.json", test_cb_73 => "cb 73.json",
+        test_cb_74 => "cb 74.json", test_cb_75 => "cb 75.json", test_cb_76 => "cb 76.json", test_cb_77 => "cb 77.json",
+        test_cb_78 => "cb 78.json", test_cb_79 => "cb 79.json", test_cb_7a => "cb 7a.json", test_cb_7b => "cb 7b.json",
+        test_cb_7c => "cb 7c.json", test_cb_7d => "cb 7d.json", test_cb_7e => "cb 7e.json", test_cb_7f => "cb 7f.json",
+        test_cb_80 => "cb 80.json", test_cb_81 => "cb 81.json", test_cb_82 => "cb 82.json", test_cb_83 => "cb 83.json",
+        test_cb_84 => "cb 84.json", test_cb_85 => "cb 85.json", test_cb_86 => "cb 86.json", test_cb_87 => "cb 87.json",
+        test_cb_88 => "cb 88.json", test_cb_89 => "cb 89.json", test_cb_8a => "cb 8a.json", test_cb_8b => "cb 8b.json",
+        test_cb_8c => "cb 8c.json", test_cb_8d => "cb 8d.json", test_cb_8e => "cb 8e.json", test_cb_8f => "cb 8f.json",
+        test_cb_90 => "cb 90.json", test_cb_91 => "cb 91.json", test_cb_92 => "cb 92.json", test_cb_93 => "cb 93.json",
+        test_cb_94 => "cb 94.json", test_cb_95 => "cb 95.json", test_cb_96 => "cb 96.json", test_cb_97 => "cb 97.json",
+        test_cb_98 => "cb 98.json", test_cb_99 => "cb 99.json", test_cb_9a => "cb 9a.json", test_cb_9b => "cb 9b.json",
+        test_cb_9c => "cb 9c.json", test_cb_9d => "cb 9d.json", test_cb_9e => "cb 9e.json", test_cb_9f => "cb 9f.json",
+        test_cb_a0 => "cb a0.json", test_cb_a1 => "cb a1.json", test_cb_a2 => "cb a2.json", test_cb_a3 => "cb a3.json",
+        test_cb_a4 => "cb a4.json", test_cb_a5 => "cb a5.json", test_cb_a6 => "cb a6.json", test_cb_a7 => "cb a7.json",
+        test_cb_a8 => "cb a8.json", test_cb_a9 => "cb a9.json", test_cb_aa => "cb aa.json", test_cb_ab => "cb ab.json",
+        test_cb_ac => "cb ac.json", test_cb_ad => "cb ad.json", test_cb_ae => "cb ae.json", test_cb_af => "cb af.json",
+        test_cb_b0 => "cb b0.json", test_cb_b1 => "cb b1.json", test_cb_b2 => "cb b2.json", test_cb_b3 => "cb b3.json",
+        test_cb_b4 => "cb b4.json", test_cb_b5 => "cb b5.json", test_cb_b6 => "cb b6.json", test_cb_b7 => "cb b7.json",
+        test_cb_b8 => "cb b8.json", test_cb_b9 => "cb b9.json", test_cb_ba => "cb ba.json", test_cb_bb => "cb bb.json",
+        test_cb_bc => "cb bc.json", test_cb_bd => "cb bd.json", test_cb_be => "cb be.json", test_cb_bf => "cb bf.json",
+        test_cb_c0 => "cb c0.json", test_cb_c1 => "cb c1.json", test_cb_c2 => "cb c2.json", test_cb_c3 => "cb c3.json",
+        test_cb_c4 => "cb c4.json", test_cb_c5 => "cb c5.json", test_cb_c6 => "cb c6.json", test_cb_c7 => "cb c7.json",
+        test_cb_c8 => "cb c8.json", test_cb_c9 => "cb c9.json", test_cb_ca => "cb ca.json", test_cb_cb => "cb cb.json",
+        test_cb_cc => "cb cc.json", test_cb_cd => "cb cd.json", test_cb_ce => "cb ce.json", test_cb_cf => "cb cf.json",
+        test_cb_d0 => "cb d0.json", test_cb_d1 => "cb d1.json", test_cb_d2 => "cb d2.json", test_cb_d3 => "cb d3.json",
+        test_cb_d4 => "cb d4.json", test_cb_d5 => "cb d5.json", test_cb_d6 => "cb d6.json", test_cb_d7 => "cb d7.json",
+        test_cb_d8 => "cb d8.json", test_cb_d9 => "cb d9.json", test_cb_da => "cb da.json", test_cb_db => "cb db.json",
+        test_cb_dc => "cb dc.json", test_cb_dd => "cb dd.json", test_cb_de => "cb de.json", test_cb_df => "cb df.json",
+        test_cb_e0 => "cb e0.json", test_cb_e1 => "cb e1.json", test_cb_e2 => "cb e2.json", test_cb_e3 => "cb e3.json",
+        test_cb_e4 => "cb e4.json", test_cb_e5 => "cb e5.json", test_cb_e6 => "cb e6.json", test_cb_e7 => "cb e7.json",
+        test_cb_e8 => "cb e8.json", test_cb_e9 => "cb e9.json", test_cb_ea => "cb ea.json", test_cb_eb => "cb eb.json",
+        test_cb_ec => "cb ec.json", test_cb_ed => "cb ed.json", test_cb_ee => "cb ee.json", test_cb_ef => "cb ef.json",
+        test_cb_f0 => "cb f0.json", test_cb_f1 => "cb f1.json", test_cb_f2 => "cb f2.json", test_cb_f3 => "cb f3.json",
+        test_cb_f4 => "cb f4.json", test_cb_f5 => "cb f5.json", test_cb_f6 => "cb f6.json", test_cb_f7 => "cb f7.json",
+        test_cb_f8 => "cb f8.json", test_cb_f9 => "cb f9.json", test_cb_fa => "cb fa.json", test_cb_fb => "cb fb.json",
+        test_cb_fc => "cb fc.json", test_cb_fd => "cb fd.json", test_cb_fe => "cb fe.json", test_cb_ff => "cb ff.json",
     }
 }
