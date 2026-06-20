@@ -8,7 +8,7 @@ To emulate the Spectrum accurately, you must understand the tight coupling betwe
 
 The original 48K Spectrum consists of only four active components from an emulation standpoint. Later models extend this base with additional chips, but the core remains the same:
 
-1. **The Z80A CPU**: The brain. Running at exactly 3.5 MHz (3,500,000 Hz), it executes instructions, handles interrupts, and drives all I/O.
+1. **The Z80A CPU**: The brain. Running at either 3.5 MHz (48K/+) or approximately 3.5469 MHz (128K/+2/+2A/+2B/+3), it executes instructions, handles interrupts, and drives all I/O.
 2. **The 16K ROM**: A mask ROM containing the Sinclair BASIC interpreter and core I/O routines. It occupies the lowest address space (`0x0000 - 0x3FFF`). Later models may page in alternative ROM banks.
 3. **The RAM**: 48K of dynamic RAM on original models (`0x4000 - 0xFFFF`), expanded to 128K on later models via bank switching. The lower 16K (`0x4000 - 0x7FFF`) is always shared with the video hardware.
 4. **The ULA (Uncommitted Logic Array)**: The custom silicon that generates the video signal, reads the keyboard, outputs tape audio, and triggers interrupts. It is *not* a programmable GPU; it is a hardwired state machine.

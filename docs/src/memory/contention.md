@@ -1,14 +1,22 @@
 # Contended Memory
 
-When the ULA is drawing the active screen area, it needs to access video memory (`0x4000–0x7FFF`). The RAM cannot be read by two devices simultaneously, so the ULA is given higher priority (the electron beam cannot be interrupted). If the Z80 attempts to read or write the lower 16K of RAM during this period, the ULA halts the CPU via the `WAIT` pin until the ULA has finished.
+When the ULA is drawing the active screen area, it needs to access video memory. The RAM cannot be read by two devices simultaneously, so the ULA is given higher priority (the electron beam cannot be interrupted). If the Z80 attempts to read or write contended RAM during this period, the ULA halts the CPU via the `WAIT` pin until the ULA has finished.
 
-This effect occurs **only** during the active display period (192 scanlines). During border and vertical retrace, the ULA does not access RAM and no contention occurs.
+Contention occurs **only** during the active display period (192 scanlines). During border and vertical retrace, the ULA does not access RAM and no contention occurs.
 
-On 128K models, the contention sequence starts at a different cycle (14361 vs 14335 on 48K). The alternate screen buffer in bank 7 is also subject to contention when it is the currently displayed screen.
+## Contended RAM Banks by Model
 
-## Contention Cycle Table
+| Model | Contended banks |
+|---|---|
+| 16K / 48K / Spectrum+ | `0x4000–0x7FFF` (lower 16K of RAM) |
+| 128K / +2 | Banks 1, 3, 5, 7 |
+| +2A / +2B / +3 | Banks 4, 5, 6, 7 |
 
-At the start of each active scanline, contention follows an 8-cycle pattern that repeats every 8 T-states. The pattern begins at cycle 14335 (48K) or 14361 (128K) relative to the interrupt:
+On 128K models, the alternate screen buffer in bank 7 is always contended, even when not displayed.
+
+## 48K / Spectrum+ Contention
+
+The contention pattern follows an 8-cycle sequence repeating every 224 T-states (one scanline). It starts at cycle **14335** relative to the interrupt:
 
 | Cycle # (mod 8) | Delay (T-states) |
 |---|---|
@@ -18,29 +26,55 @@ At the start of each active scanline, contention follows an 8-cycle pattern that
 | 3 | 3 |
 | 4 | 2 |
 | 5 | 1 |
-| 6 | 0 (no delay) |
-| 7 | 0 (no delay) |
+| 6 | 0 |
+| 7 | 0 |
 
-Expanded for the first 16 cycles of the active display:
+## 128K / +2 Contention
 
-| Cycle # (48K) | Cycle # (128K) | Delay |
-|---|---|---|
-| 14335 | 14361 | 6 |
-| 14336 | 14362 | 5 |
-| 14337 | 14363 | 4 |
-| 14338 | 14364 | 3 |
-| 14339 | 14365 | 2 |
-| 14340 | 14366 | 1 |
-| 14341 | 14367 | 0 |
-| 14342 | 14368 | 0 |
-| 14343 | 14369 | 6 |
-| ... | ... | ... (pattern repeats every 8 cycles) |
+The same 8-cycle pattern as the 48K, but starting at cycle **14361** relative to the interrupt and repeating every **228** T-states (one 128K scanline):
 
-This pattern continues through all 192 active display lines (14335 to 14463 for the first line), then resets at the start of each subsequent line. During border lines no contention occurs.
+| Cycle # | Delay |
+|---|---|
+| 14361 | 6 |
+| 14362 | 5 |
+| 14363 | 4 |
+| 14364 | 3 |
+| 14365 | 2 |
+| 14366 | 1 |
+| 14367 | 0 |
+| 14368 | 0 |
+| 14369 | 6 |
+| ... | (pattern repeats every 8 cycles) |
+
+## +2A / +2B / +3 Contention
+
+The +2A/+3 use a different contention pattern. The first pixel of the screen is displayed at cycle **14364**; contention follows a 10-cycle sequence starting at cycle **14365**:
+
+| Cycle # | Delay |
+|---|---|
+| 14365 | 1 |
+| 14366 | 0 |
+| 14367 | 7 |
+| 14368 | 6 |
+| 14369 | 5 |
+| 14370 | 4 |
+| 14371 | 3 |
+| 14372 | 2 |
+| 14373 | 1 |
+| 14374 | 0 |
+| 14375 | 7 |
+| 14376 | 6 |
+| ... | (pattern repeats every 228 T-states) |
+
+The pattern continues until cycle 14494 (end of first scanline), then resets at 14593 (= 14365 + 228) for the next scanline.
+
+### Combined Instruction Entries (+2A/+3)
+
+On the +2A/+3, instructions with multiple `pc+1` or `hl` entries in the 48K/128K breakdown are **combined into a single entry**. For example, `JR n` on 48K has `pc:4, pc+1:3, [pc+1:1×5]`; on +2A/+3 this becomes `pc:4, pc+1:8`. This applies throughout the instruction table below.
 
 ## Wait State Insertion
 
-When a contended access occurs, the ULA inserts wait states equal to the delay for the current cycle. The Z80 is stopped mid-instruction, and the cycle counter is advanced by the delay amount. The exact number of T-states an instruction takes in contended memory is therefore:
+When a contended access occurs, the ULA inserts wait states equal to the delay for the current cycle. The Z80 is stopped mid-instruction, and the cycle counter is advanced by the delay amount:
 
 ```
 actual_time = base_time + sum_of_delays_at_each_contented_access_point
@@ -56,13 +90,15 @@ instruction    point1:duration1, point2:duration2, ...
 
 Where `point` is the address or register that determines whether contention applies, and `duration` is the number of uncontended T-states consumed at that point (before any potential delay).
 
-- If `point` is within `0x4000–0x7FFF` (contended RAM), apply the delay for the current cycle before continuing.
+- If `point` is within contended RAM (see table above), apply the delay for the current cycle before continuing.
 - `IO` means the cycle is an I/O access, subject to [Contended I/O](../ula/contended_io.md) rules.
 - `(write)` marks the cycle in which the value is written to memory — important for pixel-timed effects.
 
 For conditional instructions, entries in `[square brackets]` apply only when the condition is met. For unconditional instructions they always apply.
 
 `dd` = BC, DE, HL, SP — `qq` = BC, DE, HL, AF — `ss` = BC, DE, HL — `ii` = IX or IY — `cc` = condition (NZ, Z, NC, C, PO, PE, P, M) — `b` = bit number 0–7 — `r, r'` = A, B, C, D, E, H, L — `alo` = ADD, ADC, SUB, SBC, AND, XOR, OR, CP — `sro` = RLC, RRC, RL, RR, SLA, SRA, SRL, SLL
+
+**Note for +2A/+3:** entries with multiple sub-cycles at the same point (e.g. `pc+1:1×5`, `hl:3, hl:1`) are combined into a single contiguous delay. See note above.
 
 ### 1-byte / register-only instructions
 
@@ -217,8 +253,9 @@ OUTI/OTIR / OUTD/OTDR                    pc:4, pc+1:5, hl:3, IO, [hl:1×5]
 - Replacing HL with IX or IY does not affect timings except for adding an initial `pc:4` for the DD or FD prefix.
 - Undocumented DDCB and FDCB variants share the same timings as documented CB-prefixed versions.
 - DD/FD prefixes on instructions that do not involve HL add only an initial `pc:4`.
+- On the +2A/+3, multiple sub-cycles at the same contention point are combined (e.g. `pc+1:3, [pc+1:1×5]` → `pc+1:8`).
 
-## Example
+## Example (48K)
 
 Instruction `LD (HL),A` with `pc:4, hl:3`:
 
@@ -228,7 +265,7 @@ Instruction `LD (HL),A` with `pc:4, hl:3`:
 Starting at cycle 14335 with PC=25000, HL=26000:
 1. Cycle 14335 → 6 T-states delay (now at 14341)
 2. Opcode fetch: 4 T-states (now at 14345)
-3. Cycle 14345 → 4 T-states delay (now at 14349)  
+3. Cycle 14345 → 4 T-states delay (now at 14349)
 4. Write A to (HL): 3 T-states (now at 14352)
 
 Next opcode fetch at cycle 14352 (PC=25001) → 1 T-state delay.

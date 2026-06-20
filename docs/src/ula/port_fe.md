@@ -71,6 +71,10 @@ There is an analogue delay when bit 4 changes from 1 to 0, caused by capacitors 
 
 The keyboard is arranged as an 8×5 matrix. Any two simultaneously pressed keys can be uniquely decoded. However, with three or more keys, decoding may produce phantom results. For example, pressing CAPS SHIFT, B, and V simultaneously causes the Spectrum to also detect SPACE as pressed, producing a "Break into Program" report. Some games rely on this matrix behaviour (e.g., Zynaps requires pressing 5, 6, 7, 8, and 0 simultaneously to pause).
 
+### +2A / +2B / +3 Model Difference
+
+On the +2A, +2B, and +3, bit 6 of IN from port `0xFE` **does not** depend on what was previously written to port `0xFE`. It always returns 0 if there is no EAR input signal.
+
 ### Floating Bus on Port Reads
 
-Reading from a port with the low bit set (odd ports) when the ULA is not driving the bus returns a mixture of `0xFF` and screen/attribute data — see [The Floating Bus](./floating_bus.md).
+Reading from a port with the low bit set (odd ports) when the ULA is not driving the bus returns a mixture of `0xFF` and screen/attribute data — see [The Floating Bus](./floating_bus.md). This does **not** apply to the +2A/+3, which always return 255.

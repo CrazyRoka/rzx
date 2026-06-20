@@ -13,7 +13,12 @@ On the 16K model, only the lower 16 KB of RAM is populated (`0x4000 – 0x7FFF`)
 
 On 128K models, the upper 32 KB is replaced by a paged window — see [128K Memory Paging](./paging_128k.md).
 
-### Contended Regions
+### Contended Regions by Model
 
-Contended memory regions: `0x4000 – 0x7FFF` (video RAM + attributes).
-On 128K models, the alternate screen buffer (bank 7, when mapped to `0xC000 – 0xFFFF`) is also contended if it is the currently displayed screen.
+| Model | Contended memory |
+|---|---|
+| 16K / 48K / Spectrum+ | `0x4000 – 0x7FFF` (video RAM + attributes) |
+| 128K / +2 | Banks 1, 3, 5, 7 (banks 5 and 7 are the two screen buffers) |
+| +2A / +2B / +3 | Banks 4, 5, 6, 7 |
+
+On 128K machines, contended banks are slowed regardless of whether they are the currently displayed screen.

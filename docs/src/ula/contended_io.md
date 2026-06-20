@@ -19,3 +19,8 @@ The pattern is read left to right:
 - **`C:n`** — ULA halts the Z80 for the same delay as a contended memory access at this cycle (e.g. 6 T-states at cycle 14335, 5 at 14336, etc. on the 48K). After the delay, the Z80 continues for `n` cycles.
 
 See [Contended Memory](../memory/contention.md) for the per-cycle delay table.
+
+## Model Exceptions
+
+- **+2A, +2B, +3:** Port 0xFE is **not** contended. Reading or writing even ports does not trigger a ULA delay on these models.
+- **Port 0x7FFD (all 128K models):** Not contended in itself, but the high byte being `0x7F` (which falls in `0x40–0x7F`) causes the second effect to apply.

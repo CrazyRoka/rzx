@@ -9,4 +9,8 @@ This behaviour is used intentionally by some programs. For example, **Arkanoid**
 
 See also [Contended I/O](./contended_io.md) for how reading from even ports interacts with contention.
 
+## +2A / +2B / +3 Exception
+
+On the +2A, +2B, and +3 models, reading from a non-existing port (e.g. `0xFF`) will **always return 255** and never return screen or attribute bytes. This is a definitive way to distinguish the +2A/+3 from earlier models at runtime.
+
 TODO: Document how the floating bus can be used to detect 48K vs 128K models, and the exact T-state conditions under which specific data values are returned.
