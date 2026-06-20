@@ -1,5 +1,13 @@
 # Contended I/O
 
+## Spider Modification
+
+Early ULA revisions contended **all** I/O access regardless of port address, even though the ULA only responds to even ports (A0 = 0). The "spider" modification gates the ULA's /IORQ input with A0, ensuring only even ports trigger the ULA's contention circuit. This was added as a bodge on Issue 1 and Issue 2 boards and incorporated into the PCB from Issue 3 onward.
+
+Without this fix, reading odd ports during the active display could cause unnecessary delays and return stale data from the ULA's internal bus. Emulators that handle the "spider" correctly apply the contention pattern **only** when A0 = 0, regardless of whether the port is actually `0xFE`.
+
+## Contention Patterns
+
 It takes four T-states for the Z80 to read from or write to an I/O port. This can be lengthened by the ULA through two independent effects:
 
 1. **Low bit of port address is reset (even ports):** The ULA must supply the result, causing a delay if the ULA is busy handling the screen.

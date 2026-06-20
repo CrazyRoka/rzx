@@ -63,6 +63,7 @@
 
 - [Hardware Revisions & Quirks](./quirks/README.md)
   - [Model Variants](./quirks/model_variants.md)
+  - [Motherboard Revisions](./quirks/motherboard_revisions.md)
   - [The I Register Snow Bug](./quirks/i_register_snow.md)
   - [EAR/MIC Circuit Delays](./quirks/ear_mic_delays.md)
   - [Model Detection](./quirks/model_detection.md)

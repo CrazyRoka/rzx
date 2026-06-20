@@ -43,6 +43,10 @@ The +2A and +3 use the same 8-pin DIN connector but with different signals — R
 | 7 | Red | Analogue, 1.67 V p-p |
 | 8 | Blue | Analogue, 1.67 V p-p |
 
+## Dot Crawl
+
+The 48K Spectrum suffers from severe dot crawl because the pixel clock is **not** synchronised with the PAL colour subcarrier. This was a deliberate design compromise — synchronising them would have required changing the video timings (T-states per line, frame rate, etc.). The ULA outputs Y, U, and V colour-difference signals directly without modulating a carrier, so dot crawl can be avoided in an emulator by rendering at the raw pixel level. This issue was fixed in later models (128K, +2, +3) which use a different clocking arrangement.
+
 ## Connector Pinout Reference
 
 ```

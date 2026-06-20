@@ -1,6 +1,12 @@
 # The ULA
 
-The ULA (Uncommitted Logic Array) is the Spectrum's custom silicon — a hardwired state machine that generates the video signal, reads the keyboard, outputs audio to the beeper and tape, and triggers interrupts. It is **not** a programmable GPU; every function is baked into the gate array.
+The ULA (Uncommitted Logic Array) is the Spectrum's custom silicon — a hardwired state machine that generates the video signal, reads the keyboard, outputs audio to the beeper and tape, and triggers interrupts. It is **not** a programmable GPU; every function is baked into the gate array. It was designed by Richard Altwasser and manufactured by Ferranti.
+
+## ULA Series Revisions
+
+The initial ULA series is the **5C**. Ferranti later switched to the **6C** series, which uses less power (runs cooler) and introduced changes to the EAR socket handling that caused compatibility differences with tape loading (see [EAR/MIC Circuit Delays](../quirks/ear_mic_delays.md)). The 6C series was used from the Issue 3 motherboard onwards.
+
+The first production batch of 5C ULAs all failed to operate correctly except for one — a speck of dust had landed on the die in exactly the right position to bridge an otherwise disconnected part of the clock circuit.
 
 ## Pinout (40-pin DIP)
 

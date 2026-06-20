@@ -4,6 +4,12 @@ When the ULA is drawing the active screen area, it needs to access video memory.
 
 Contention occurs **only** during the active display period (192 scanlines). During border and vertical retrace, the ULA does not access RAM and no contention occurs.
 
+## Dead Cockroach Fix
+
+The ULA's I/O contention circuit had a timing error: it contended **all** I/O access, not just access to its own port (`0xFE`). On early Issue 1 and Issue 2 boards this was corrected by a bodge of two small capacitors soldered near the ULA — known as the "dead cockroach" for its appearance. Later ULA revisions incorporated the fix directly into the silicon rather than correcting the root timing issue.
+
+The fix prevents the ULA from asserting contention on odd port addresses (where A0 = 1), ensuring only even port I/O is subject to the ULA contention circuit. Without it, reading odd ports during the active display incurs unnecessary delay and the ULA may drive stale data onto the bus.
+
 ## Contended RAM Banks by Model
 
 | Model | Contended banks |

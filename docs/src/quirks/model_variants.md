@@ -70,6 +70,12 @@
 - Black case (+2A) / darker grey (+2B).
 - +12 V rail: 200 mA (reduced from +3).
 
+### NTSC Spectrum (1982, Sinclair — Chile)
+- Standard 48K Spectrum hardware sold in Chile.
+- Uses **5C114E** or **6C011E-3** ULA (NTSC variants).
+- Did not meet FCC standards, so was never sold in the USA — the Timex TS2068 was produced for the US market instead.
+- Very few machines known to exist.
+
 ### TS2068 (1985, Timex — USA)
 - Enhanced Spectrum, 48 KB RAM, 24 KB ROM (3 banks of 8 KB).
 - CPU: Z80A @ 3.528 MHz.
