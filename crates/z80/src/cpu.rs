@@ -8,6 +8,14 @@ const FLAG_ADD_OR_SUBTRACT: u8 = 1 << 1;
 const FLAG_CARRY: u8 = 1 << 0;
 
 #[derive(Default, PartialEq, Eq, Debug)]
+enum InterruptMode {
+    #[default]
+    IM1,
+    IM2,
+    IM0,
+}
+
+#[derive(Default, PartialEq, Eq, Debug)]
 struct Z80 {
     a: u8,
     b: u8,
@@ -19,6 +27,7 @@ struct Z80 {
     l: u8,
     i: u8,
     r: u8,
+    p: bool,
     w: u8,
     z: u8,
     q: u8,
@@ -37,6 +46,9 @@ struct Z80 {
     ix: u16,
     iy: u16,
     ei: bool,
+    im: InterruptMode,
+    iff1: bool,
+    iff2: bool,
 }
 
 impl Z80 {
@@ -48,6 +60,7 @@ impl Z80 {
         let opcode = self.read_byte(bus);
         self.r = (((self.r & 0x7F) + 1) & 0x7F) | (self.r & 0x80);
         self.ei = false;
+        self.p = false;
         let old_f = self.f;
         let old_q = self.q;
         let cycles = self.step(bus, opcode);
@@ -638,7 +651,6 @@ mod tests {
         }
     }
 
-    // TODO: handle other cpu states
     #[derive(Deserialize)]
     struct TestCaseState {
         pc: u16,
@@ -661,11 +673,11 @@ mod tests {
         bc_: u16,
         de_: u16,
         hl_: u16,
-        // "im": 0,
-        // "p": 1,
+        im: u8,
+        p: u8,
         q: u8,
-        // "iff1": 0,
-        // "iff2": 1,
+        iff1: u8,
+        iff2: u8,
         ram: Vec<(u16, u8)>,
     }
 
@@ -683,6 +695,11 @@ mod tests {
             cpu.l = self.l;
             cpu.i = self.i;
             cpu.r = self.r;
+            cpu.p = match self.p {
+                0 => false,
+                1 => true,
+                _ => panic!("Unexpected P value {}", self.ei),
+            };
             cpu.w = (self.wz >> 8) as u8;
             cpu.z = (self.wz & 0xFF) as u8;
             cpu.q = self.q;
@@ -698,7 +715,27 @@ mod tests {
             cpu.l_shadow = (self.hl_ & 0xFF) as u8;
             cpu.pc = self.pc;
             cpu.sp = self.sp;
-            cpu.ei = self.ei == 1;
+            cpu.ei = match self.ei {
+                0 => false,
+                1 => true,
+                _ => panic!("Unexpected EI value {}", self.ei),
+            };
+            cpu.im = match self.im {
+                0 => super::InterruptMode::IM0,
+                1 => super::InterruptMode::IM1,
+                2 => super::InterruptMode::IM2,
+                _ => panic!("Unexpected interrupt mode {}", self.im),
+            };
+            cpu.iff1 = match self.iff1 {
+                0 => false,
+                1 => true,
+                _ => panic!("Unexpected IFF1 value {}", self.iff1),
+            };
+            cpu.iff2 = match self.iff2 {
+                0 => false,
+                1 => true,
+                _ => panic!("Unexpected IFF2 value {}", self.iff2),
+            };
 
             cpu
         }
