@@ -52,6 +52,12 @@
   - [LOAD/SAVE ROM Routines](./tape/rom_routines.md)
   - [+3 Disk Drive & .DSK Format](./tape/dsk_format.md)
 
+# Operating System
+
+- [Channels & Streams](./channels/README.md)
+  - [Stream Concepts](./channels/concepts.md)
+  - [Channel & Stream Memory Formats](./channels/memory_formats.md)
+
 # Hardware Reference
 
 - [Hardware Revisions & Quirks](./quirks/README.md)
@@ -59,6 +65,7 @@
   - [The I Register Snow Bug](./quirks/i_register_snow.md)
   - [EAR/MIC Circuit Delays](./quirks/ear_mic_delays.md)
   - [Model Detection](./quirks/model_detection.md)
+  - [ZX Interface I](./quirks/zx_interface1.md)
 
 # Appendix
 
