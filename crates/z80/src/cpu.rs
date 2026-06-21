@@ -59,7 +59,40 @@ pub struct Z80 {
 
 impl Z80 {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            a: 0xFF,
+            b: 0xFF,
+            c: 0xFF,
+            d: 0xFF,
+            e: 0xFF,
+            f: 0xFF,
+            h: 0xFF,
+            l: 0xFF,
+            i: 0xFF,
+            r: 0xFF,
+            p: true,
+            w: 0xFF,
+            z: 0xFF,
+            q: 0xFF,
+            a_shadow: 0xFF,
+            b_shadow: 0xFF,
+            c_shadow: 0xFF,
+            d_shadow: 0xFF,
+            e_shadow: 0xFF,
+            f_shadow: 0xFF,
+            h_shadow: 0xFF,
+            l_shadow: 0xFF,
+            w_shadow: 0xFF,
+            z_shadow: 0xFF,
+            pc: 0,
+            sp: 0xFFFF,
+            ix: 0xFFFF,
+            iy: 0xFFFF,
+            ei: false,
+            im: InterruptMode::IM0,
+            iff1: false,
+            iff2: false,
+        }
     }
 
     pub fn execute<B: Bus>(&mut self, bus: &mut B) -> u64 {
@@ -1579,8 +1612,7 @@ impl Z80 {
         }
     }
 
-    fn handle_block_repeat(&mut self, is_repeating: bool, is_increment: bool, base_f: u8) -> u64 {
-        let port = self.bc();
+    fn handle_block_repeat(&mut self, is_repeating: bool, base_f: u8) -> u64 {
         self.f = base_f;
         self.q = !self.q;
 
@@ -1996,7 +2028,7 @@ impl Z80 {
                     }
                     | if n_flag { FLAG_ADD_OR_SUBTRACT } else { 0 };
 
-                self.handle_block_repeat(false, true, base_f)
+                self.handle_block_repeat(false, base_f)
             }
             0xAA => {
                 // IND
@@ -2023,7 +2055,7 @@ impl Z80 {
                     }
                     | if n_flag { FLAG_ADD_OR_SUBTRACT } else { 0 };
 
-                self.handle_block_repeat(false, false, base_f)
+                self.handle_block_repeat(false, base_f)
             }
             0xA3 => {
                 // OUTI
@@ -2047,7 +2079,7 @@ impl Z80 {
                     }
                     | if n_flag { FLAG_ADD_OR_SUBTRACT } else { 0 };
 
-                self.handle_block_repeat(false, true, base_f)
+                self.handle_block_repeat(false, base_f)
             }
             0xAB => {
                 // OUTD
@@ -2072,7 +2104,7 @@ impl Z80 {
                     }
                     | if n_flag { FLAG_ADD_OR_SUBTRACT } else { 0 };
 
-                self.handle_block_repeat(false, false, base_f)
+                self.handle_block_repeat(false, base_f)
             }
             0xB2 => {
                 // INIR
@@ -2094,7 +2126,7 @@ impl Z80 {
                     | if n_flag { FLAG_ADD_OR_SUBTRACT } else { 0 }
                     | if c_flag { FLAG_CARRY } else { 0 };
 
-                self.handle_block_repeat(true, true, base_f)
+                self.handle_block_repeat(true, base_f)
             }
             0xBA => {
                 // INDR
@@ -2116,7 +2148,7 @@ impl Z80 {
                     | if n_flag { FLAG_ADD_OR_SUBTRACT } else { 0 }
                     | if c_flag { FLAG_CARRY } else { 0 };
 
-                self.handle_block_repeat(true, false, base_f)
+                self.handle_block_repeat(true, base_f)
             }
             0xB3 => {
                 // OTIR
@@ -2136,7 +2168,7 @@ impl Z80 {
                     | if n_flag { FLAG_ADD_OR_SUBTRACT } else { 0 }
                     | if c_flag { FLAG_CARRY } else { 0 };
 
-                self.handle_block_repeat(true, true, base_f)
+                self.handle_block_repeat(true, base_f)
             }
             0xBB => {
                 // OTDR
@@ -2156,7 +2188,7 @@ impl Z80 {
                     | if n_flag { FLAG_ADD_OR_SUBTRACT } else { 0 }
                     | if c_flag { FLAG_CARRY } else { 0 };
 
-                self.handle_block_repeat(true, false, base_f)
+                self.handle_block_repeat(true, base_f)
             }
             _ => panic!("Unexpected ED opcode {opcode:02X}"),
         }
