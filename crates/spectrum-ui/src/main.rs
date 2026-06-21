@@ -1,6 +1,6 @@
-use std::{cell::RefCell, env::args, fs, io::Error, process::exit, rc::Rc};
+use std::{cell::RefCell, env::args, fs, io::Error, process::exit, rc::Rc, time::Instant};
 
-use minifb::{Key, Scale, Window, WindowOptions};
+use minifb::{Key, KeyRepeat, Scale, Window, WindowOptions};
 use spectrum::{Keyboard, Spectrum16k, SpectrumKey, ULA, WINDOW_HEIGHT, WINDOW_WIDTH};
 use z80::{Bus, Z80};
 
@@ -35,12 +35,24 @@ fn main() -> Result<(), Error> {
         }
     };
     window.set_target_fps(50);
+    let mut unlimited_fps = false;
+    let mut last_fps_update = Instant::now();
+    let mut frame_count = 0;
 
     while window.is_open() {
         keyboard.borrow_mut().reset();
         for key in window.get_keys() {
             if let Some(spectrum_key) = convert_to_spectrum_key(key) {
                 keyboard.borrow_mut().press_key(&spectrum_key);
+            }
+        }
+
+        if window.is_key_pressed(Key::F1, KeyRepeat::No) {
+            unlimited_fps = !unlimited_fps;
+            if unlimited_fps {
+                window.set_target_fps(0);
+            } else {
+                window.set_target_fps(50);
             }
         }
 
@@ -54,6 +66,25 @@ fn main() -> Result<(), Error> {
 
         if let Err(err) = window.update_with_buffer(&buffer, WINDOW_WIDTH, WINDOW_HEIGHT) {
             panic!("Failed to update window: {}", err);
+        }
+
+        frame_count += 1;
+        let elapsed = last_fps_update.elapsed();
+        if elapsed.as_secs_f32() >= 0.5 {
+            let fps = frame_count as f32 / elapsed.as_secs_f32();
+            let mode_str = if unlimited_fps {
+                "Unlimited"
+            } else {
+                "Locked (50Hz)"
+            };
+
+            window.set_title(&format!(
+                "ZX Spectrum Emulator | FPS: {:.1} | Mode: {} [Press F1 to Toggle]",
+                fps, mode_str
+            ));
+
+            frame_count = 0;
+            last_fps_update = Instant::now();
         }
     }
 
