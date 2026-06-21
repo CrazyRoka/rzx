@@ -38,7 +38,7 @@ fn main() -> Result<(), Error> {
 
     while window.is_open() {
         keyboard.borrow_mut().reset();
-        for key in window.get_keys_pressed(minifb::KeyRepeat::Yes) {
+        for key in window.get_keys() {
             if let Some(spectrum_key) = convert_to_spectrum_key(key) {
                 keyboard.borrow_mut().press_key(&spectrum_key);
             }
