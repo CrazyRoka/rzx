@@ -1,0 +1,9 @@
+[package]
+name = "spectrum-ui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+z80 = { path = "../z80" }
+spectrum = { path = "../spectrum" }
+minifb = "0.28"
