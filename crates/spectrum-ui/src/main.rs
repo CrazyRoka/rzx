@@ -62,7 +62,7 @@ fn main() -> Result<(), Error> {
 
 fn convert_to_spectrum_key(key: Key) -> Option<SpectrumKey> {
     match key {
-        Key::CapsLock => Some(SpectrumKey::CapsShift),
+        Key::LeftShift => Some(SpectrumKey::CapsShift),
         Key::Z => Some(SpectrumKey::Z),
         Key::X => Some(SpectrumKey::X),
         Key::C => Some(SpectrumKey::C),
@@ -98,7 +98,7 @@ fn convert_to_spectrum_key(key: Key) -> Option<SpectrumKey> {
         Key::J => Some(SpectrumKey::J),
         Key::H => Some(SpectrumKey::H),
         Key::Space => Some(SpectrumKey::Space),
-        Key::LeftShift | Key::RightShift => Some(SpectrumKey::SymbolShift),
+        Key::LeftCtrl => Some(SpectrumKey::SymbolShift),
         Key::M => Some(SpectrumKey::M),
         Key::N => Some(SpectrumKey::N),
         Key::B => Some(SpectrumKey::B),
