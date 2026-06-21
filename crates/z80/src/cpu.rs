@@ -22,7 +22,7 @@ enum IndexReg {
 }
 
 #[derive(Default, PartialEq, Eq, Debug)]
-struct Z80 {
+pub struct Z80 {
     a: u8,
     b: u8,
     c: u8,
