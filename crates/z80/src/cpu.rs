@@ -936,7 +936,7 @@ impl Z80 {
                 self.set_hl(de);
                 4
             }
-            0xED => panic!("ED prefix not implemented"),
+            0xED => self.step_ed(bus),
             0xEE => {
                 // XOR n
                 let n = self.read_byte(bus);
@@ -991,6 +991,7 @@ impl Z80 {
             _ => panic!("Unexpected opcode {opcode:02X}"),
         }
     }
+
     fn step_cb<B: Bus>(&mut self, bus: &mut B) -> u64 {
         let opcode = self.read_byte(bus);
         self.r = (((self.r & 0x7F) + 1) & 0x7F) | (self.r & 0x80);
@@ -1093,6 +1094,674 @@ impl Z80 {
         };
 
         cycles
+    }
+
+    fn adc_hl(&mut self, value: u16) {
+        let hl = self.hl();
+        let c = if self.f & FLAG_CARRY != 0 { 1 } else { 0 };
+        let result = hl as u32 + value as u32 + c as u32;
+        let result16 = result as u16;
+        let carry = result > 0xFFFF;
+        let overflow = (hl ^ result16) & (value ^ result16) & 0x8000 != 0;
+        let half_carry = (hl & 0x0FFF) + (value & 0x0FFF) + c > 0x0FFF;
+
+        self.f = if result16 == 0 { FLAG_ZERO } else { 0 }
+            | if result16 & 0x8000 != 0 { FLAG_SIGN } else { 0 }
+            | if half_carry { FLAG_HALF_CARRY } else { 0 }
+            | if overflow { FLAG_PARITY } else { 0 }
+            | if carry { FLAG_CARRY } else { 0 }
+            | ((result16 >> 8) & 0x28) as u8;
+        self.set_wz(hl.wrapping_add(1));
+        self.set_hl(result16);
+        self.q = !self.q;
+    }
+
+    fn sbc_hl(&mut self, value: u16) {
+        let hl = self.hl();
+        let c = if self.f & FLAG_CARRY != 0 { 1 } else { 0 };
+        let result = hl.wrapping_sub(value).wrapping_sub(c);
+        let carry = hl < value.wrapping_add(c);
+        let half_carry = (hl & 0x0FFF) < (value & 0x0FFF).wrapping_add(c);
+        let overflow = ((hl ^ value) & (hl ^ result) & 0x8000) != 0;
+
+        self.f = if result == 0 { FLAG_ZERO } else { 0 }
+            | if result & 0x8000 != 0 { FLAG_SIGN } else { 0 }
+            | if half_carry { FLAG_HALF_CARRY } else { 0 }
+            | if overflow { FLAG_PARITY } else { 0 }
+            | if carry { FLAG_CARRY } else { 0 }
+            | FLAG_ADD_OR_SUBTRACT
+            | ((result >> 8) & 0x28) as u8;
+        self.set_wz(hl.wrapping_add(1));
+        self.set_hl(result);
+        self.q = !self.q;
+    }
+
+    fn execute_block_io_base<B: Bus>(
+        &mut self,
+        bus: &mut B,
+        is_input: bool,
+        is_increment: bool,
+    ) -> u8 {
+        let hl = self.hl();
+
+        if is_input {
+            let port = self.bc();
+            let val = bus.port_read(port);
+            bus.write(hl, val);
+
+            if is_increment {
+                self.set_hl(hl.wrapping_add(1));
+                self.set_wz(self.bc().wrapping_add(1));
+            } else {
+                self.set_hl(hl.wrapping_sub(1));
+                self.set_wz(self.bc().wrapping_sub(1));
+            }
+            self.b = self.b.wrapping_sub(1);
+            val
+        } else {
+            let val = bus.read(hl);
+
+            if is_increment {
+                self.set_hl(hl.wrapping_add(1));
+            } else {
+                self.set_hl(hl.wrapping_sub(1));
+            }
+
+            self.b = self.b.wrapping_sub(1);
+            let port = self.bc();
+
+            if is_increment {
+                self.set_wz(port.wrapping_add(1));
+            } else {
+                self.set_wz(port.wrapping_sub(1));
+            }
+
+            bus.port_write(port, val);
+            val
+        }
+    }
+
+    fn handle_block_repeat(&mut self, is_repeating: bool, is_increment: bool, base_f: u8) -> u64 {
+        let port = self.bc();
+        self.f = base_f;
+        self.q = !self.q;
+
+        if is_repeating && self.b != 0 {
+            self.pc = self.pc.wrapping_sub(2);
+            self.set_wz(self.pc.wrapping_add(1));
+
+            let x_bit = ((self.pc >> 11) & 1) as u8;
+            let y_bit = ((self.pc >> 13) & 1) as u8;
+            self.f |= (x_bit << 3) | (y_bit << 5);
+
+            21
+        } else {
+            self.f |= self.b & 0x28;
+
+            16
+        }
+    }
+
+    fn post_in_o_r(
+        &self,
+        c_flag: bool,
+        value: u8,
+        mut h_flag: bool,
+        mut pv_flag: bool,
+    ) -> (bool, bool) {
+        if self.b != 0 {
+            if c_flag {
+                if (value & 0x80) != 0 {
+                    pv_flag ^= Self::parity(self.b.wrapping_sub(1) & 7) ^ true;
+                    h_flag = (self.b & 0x0F) == 0;
+                } else {
+                    pv_flag ^= Self::parity(self.b.wrapping_add(1) & 7) ^ true;
+                    h_flag = (self.b & 0x0F) == 0x0F;
+                }
+            } else {
+                pv_flag ^= Self::parity(self.b & 7) ^ true;
+            }
+        }
+        (h_flag, pv_flag)
+    }
+
+    fn execute_block_cp_base<B: Bus>(&mut self, bus: &mut B, is_increment: bool) -> (u8, bool) {
+        let hl = self.hl();
+        let data = bus.read(hl);
+
+        if is_increment {
+            self.set_hl(hl.wrapping_add(1));
+            self.set_wz(self.wz().wrapping_add(1));
+        } else {
+            self.set_hl(hl.wrapping_sub(1));
+            self.set_wz(self.wz().wrapping_sub(1));
+        }
+
+        let n = self.a.wrapping_sub(data);
+        let bc = self.bc().wrapping_sub(1);
+        self.set_bc(bc);
+
+        let h_flag = ((self.a ^ data ^ n) & 0x10) != 0;
+        let h_subtractor = if h_flag { 1 } else { 0 };
+        let look = n.wrapping_sub(h_subtractor);
+
+        let sign_bit = (n & 0x80) != 0;
+        let zero_bit = n == 0;
+        let pv_bit = bc != 0;
+
+        self.f = (self.f & FLAG_CARRY)
+            | if sign_bit { FLAG_SIGN } else { 0 }
+            | if zero_bit { FLAG_ZERO } else { 0 }
+            | if h_flag { FLAG_HALF_CARRY } else { 0 }
+            | if pv_bit { FLAG_PARITY } else { 0 }
+            | FLAG_ADD_OR_SUBTRACT
+            | (look & 0x08)
+            | ((look & 0x02) << 4);
+
+        (n, zero_bit)
+    }
+
+    fn handle_block_cp_repeat(&mut self, is_repeating: bool, zero_bit: bool) -> u64 {
+        let bc = self.bc();
+        self.q = !self.q;
+
+        if is_repeating && bc != 0 && !zero_bit {
+            self.pc = self.pc.wrapping_sub(2);
+            self.set_wz(self.pc.wrapping_add(1));
+
+            let x_bit = ((self.pc >> 11) & 1) as u8;
+            let y_bit = ((self.pc >> 13) & 1) as u8;
+
+            self.f = (self.f & !0x28) | (x_bit << 3) | (y_bit << 5);
+            21
+        } else {
+            16
+        }
+    }
+
+    fn step_ed<B: Bus>(&mut self, bus: &mut B) -> u64 {
+        let opcode = self.read_byte(bus);
+        self.r = (((self.r & 0x7F) + 1) & 0x7F) | (self.r & 0x80);
+
+        match opcode {
+            0x40 | 0x48 | 0x50 | 0x58 | 0x60 | 0x68 | 0x70 | 0x78 => {
+                // IN r,(C)
+                let port = self.bc();
+                let value = bus.port_read(port);
+                self.set_wz(port.wrapping_add(1));
+                let reg = (opcode >> 3) & 7;
+                if reg != 6 {
+                    self.set_reg(bus, reg, value);
+                }
+                self.f = if value == 0 { FLAG_ZERO } else { 0 }
+                    | if value & 0x80 != 0 { FLAG_SIGN } else { 0 }
+                    | if Self::parity(value) { FLAG_PARITY } else { 0 }
+                    | (value & 0x28)
+                    | (self.f & FLAG_CARRY);
+                self.q = !self.q;
+                12
+            }
+            0x41 | 0x49 | 0x51 | 0x59 | 0x61 | 0x69 | 0x71 | 0x79 => {
+                // OUT (C),r
+                let port = self.bc();
+                let reg = (opcode >> 3) & 7;
+                let value = if reg == 6 { 0 } else { self.get_reg(bus, reg) };
+                bus.port_write(port, value);
+                self.set_wz(port.wrapping_add(1));
+                12
+            }
+            0x42 | 0x52 | 0x62 | 0x72 => {
+                // SBC HL, rp
+                let rp = (opcode >> 4) & 3;
+                let value = self.get_rp(rp);
+                self.sbc_hl(value);
+                15
+            }
+            0x4A | 0x5A | 0x6A | 0x7A => {
+                // ADC HL, rp
+                let rp = (opcode >> 4) & 3;
+                let value = self.get_rp(rp);
+                self.adc_hl(value);
+                15
+            }
+            0x43 | 0x53 | 0x63 | 0x73 => {
+                // LD (nn), rp
+                let addr = self.read_word(bus);
+                let rp = (opcode >> 4) & 3;
+                let value = self.get_rp(rp);
+                bus.write(addr, value as u8);
+                bus.write(addr.wrapping_add(1), (value >> 8) as u8);
+                self.set_wz(addr.wrapping_add(1));
+                20
+            }
+            0x4B | 0x5B | 0x6B | 0x7B => {
+                // LD rp, (nn)
+                let addr = self.read_word(bus);
+                let lo = bus.read(addr) as u16;
+                let hi = bus.read(addr.wrapping_add(1)) as u16;
+                let value = (hi << 8) | lo;
+                let rp = (opcode >> 4) & 3;
+                self.set_rp(rp, value);
+                self.set_wz(addr.wrapping_add(1));
+                20
+            }
+            0x44 | 0x4C | 0x54 | 0x5C | 0x64 | 0x6C | 0x74 | 0x7C => {
+                // NEG
+                let a = self.a;
+                self.a = 0;
+                self.sub_a(a, false, true);
+                8
+            }
+            0x45 | 0x55 | 0x5D | 0x65 | 0x6D | 0x75 | 0x7D => {
+                // RETN
+                self.iff1 = self.iff2;
+                let pc = self.pop_word(bus);
+                self.pc = pc;
+                self.set_wz(pc);
+                14
+            }
+            0x4D => {
+                // RETI
+                self.iff1 = self.iff2;
+                let pc = self.pop_word(bus);
+                self.pc = pc;
+                self.set_wz(pc);
+                14
+            }
+            0x46 | 0x4E | 0x66 | 0x6E => {
+                // IM 0
+                self.im = InterruptMode::IM0;
+                8
+            }
+            0x56 | 0x76 => {
+                // IM 1
+                self.im = InterruptMode::IM1;
+                8
+            }
+            0x5E | 0x7E => {
+                // IM 2
+                self.im = InterruptMode::IM2;
+                8
+            }
+            0x47 => {
+                // LD I, A
+                self.i = self.a;
+                9
+            }
+            0x4F => {
+                // LD R, A
+                self.r = self.a;
+                9
+            }
+            0x57 => {
+                // LD A, I
+                self.a = self.i;
+                self.f = (self.f & FLAG_CARRY)
+                    | if self.a == 0 { FLAG_ZERO } else { 0 }
+                    | if self.a & 0x80 != 0 { FLAG_SIGN } else { 0 }
+                    | if self.iff2 { FLAG_PARITY } else { 0 }
+                    | (self.a & 0x28);
+                self.q = !self.q;
+                self.p = true;
+                9
+            }
+            0x5F => {
+                // LD A, R
+                self.a = self.r;
+                self.f = (self.f & FLAG_CARRY)
+                    | if self.a == 0 { FLAG_ZERO } else { 0 }
+                    | if self.a & 0x80 != 0 { FLAG_SIGN } else { 0 }
+                    | if self.iff2 { FLAG_PARITY } else { 0 }
+                    | (self.a & 0x28);
+                self.q = !self.q;
+                self.p = true;
+                9
+            }
+            0x67 => {
+                // RRD
+                let addr = self.hl();
+                let value = bus.read(addr);
+                let new_a = (self.a & 0xF0) | (value & 0x0F);
+                let new_mem = ((value >> 4) & 0x0F) | ((self.a & 0x0F) << 4);
+                self.a = new_a;
+                bus.write(addr, new_mem);
+                self.f = if self.a == 0 { FLAG_ZERO } else { 0 }
+                    | if self.a & 0x80 != 0 { FLAG_SIGN } else { 0 }
+                    | if Self::parity(self.a) { FLAG_PARITY } else { 0 }
+                    | (self.a & 0x28)
+                    | (self.f & FLAG_CARRY);
+                self.set_wz(self.hl().wrapping_add(1));
+                self.q = !self.q;
+                18
+            }
+            0x6F => {
+                // RLD
+                let addr = self.hl();
+                let value = bus.read(addr);
+                let new_a = (self.a & 0xF0) | ((value >> 4) & 0x0F);
+                let new_mem = ((value & 0x0F) << 4) | (self.a & 0x0F);
+                self.a = new_a;
+                bus.write(addr, new_mem);
+                self.f = if self.a == 0 { FLAG_ZERO } else { 0 }
+                    | if self.a & 0x80 != 0 { FLAG_SIGN } else { 0 }
+                    | if Self::parity(self.a) { FLAG_PARITY } else { 0 }
+                    | (self.a & 0x28)
+                    | (self.f & FLAG_CARRY);
+                self.set_wz(self.hl().wrapping_add(1));
+                self.q = !self.q;
+                18
+            }
+            0x77 | 0x7F => {
+                // NOP (undocumented)
+                8
+            }
+            0xA0 => {
+                // LDI
+                let hl = self.hl();
+                let de = self.de();
+                let bc = self.bc();
+                let value = bus.read(hl);
+                bus.write(de, value);
+                self.set_hl(hl.wrapping_add(1));
+                self.set_de(de.wrapping_add(1));
+                self.set_bc(bc.wrapping_sub(1));
+                let n = value.wrapping_add(self.a);
+                self.f = (self.f & (FLAG_CARRY | FLAG_ZERO | FLAG_SIGN))
+                    | if bc.wrapping_sub(1) == 0 {
+                        0
+                    } else {
+                        FLAG_PARITY
+                    }
+                    | (n & 0x08)
+                    | ((n & 0x02) << 4);
+                self.q = !self.q;
+                16
+            }
+            0xA8 => {
+                // LDD
+                let hl = self.hl();
+                let de = self.de();
+                let bc = self.bc();
+                let value = bus.read(hl);
+                bus.write(de, value);
+                self.set_hl(hl.wrapping_sub(1));
+                self.set_de(de.wrapping_sub(1));
+                self.set_bc(bc.wrapping_sub(1));
+                let n = value.wrapping_add(self.a);
+                self.f = (self.f & (FLAG_CARRY | FLAG_ZERO | FLAG_SIGN))
+                    | if bc.wrapping_sub(1) == 0 {
+                        0
+                    } else {
+                        FLAG_PARITY
+                    }
+                    | (n & 0x08)
+                    | ((n & 0x02) << 4);
+                self.q = !self.q;
+                16
+            }
+            0xB0 => {
+                // LDIR
+                let hl = self.hl();
+                let de = self.de();
+                let bc = self.bc();
+                let value = bus.read(hl);
+                bus.write(de, value);
+                self.set_hl(hl.wrapping_add(1));
+                self.set_de(de.wrapping_add(1));
+                let new_bc = bc.wrapping_sub(1);
+                self.set_bc(new_bc);
+                let n = value.wrapping_add(self.a);
+                self.f &= FLAG_CARRY | FLAG_ZERO | FLAG_SIGN;
+                self.q = !self.q;
+
+                if new_bc != 0 {
+                    self.pc = self.pc.wrapping_sub(2);
+                    self.set_wz(self.pc.wrapping_add(1));
+                    self.f |= (self.pc >> 8) as u8 & 0x28;
+                    self.f |= FLAG_PARITY;
+                    21
+                } else {
+                    self.set_wz(de.wrapping_add(1));
+                    self.f |= (n & 0x08) | ((n & 0x02) << 4);
+                    16
+                }
+            }
+            0xB8 => {
+                // LDDR
+                let hl = self.hl();
+                let de = self.de();
+                let bc = self.bc();
+                let value = bus.read(hl);
+                bus.write(de, value);
+                self.set_hl(hl.wrapping_sub(1));
+                self.set_de(de.wrapping_sub(1));
+                let new_bc = bc.wrapping_sub(1);
+                self.set_bc(new_bc);
+                let n = value.wrapping_add(self.a);
+                self.f &= FLAG_CARRY | FLAG_ZERO | FLAG_SIGN;
+                self.q = !self.q;
+
+                if new_bc != 0 {
+                    self.pc = self.pc.wrapping_sub(2);
+                    self.set_wz(self.pc.wrapping_add(1));
+                    self.f |= (self.pc >> 8) as u8 & 0x28;
+                    self.f |= FLAG_PARITY;
+                    21
+                } else {
+                    self.set_wz(de.wrapping_sub(1));
+                    self.f |= (n & 0x08) | ((n & 0x02) << 4);
+                    16
+                }
+            }
+            0xA1 => {
+                // CPI
+                let (_, zero_bit) = self.execute_block_cp_base(bus, true);
+                self.handle_block_cp_repeat(false, zero_bit)
+            }
+            0xA9 => {
+                // CPD
+                let (_, zero_bit) = self.execute_block_cp_base(bus, false);
+                self.handle_block_cp_repeat(false, zero_bit)
+            }
+            0xB1 => {
+                // CPIR
+                let (_, zero_bit) = self.execute_block_cp_base(bus, true);
+                self.handle_block_cp_repeat(true, zero_bit)
+            }
+            0xB9 => {
+                // CPDR
+                let (_, zero_bit) = self.execute_block_cp_base(bus, false);
+                self.handle_block_cp_repeat(true, zero_bit)
+            }
+            0xA2 => {
+                // INI
+                let value = self.execute_block_io_base(bus, true, true);
+
+                let modified_c = (self.c.wrapping_add(1)) as u16;
+                let k = modified_c.wrapping_add(value as u16);
+
+                let c_flag = (k & 0x100) != 0;
+                let n_flag = (value & 0x80) != 0;
+                let parity_byte = (((k & 7) as u8) ^ self.b) & 0xFF;
+
+                let base_f = if self.b == 0 { FLAG_ZERO } else { 0 }
+                    | if (self.b & 0x80) != 0 { FLAG_SIGN } else { 0 }
+                    | if Self::parity(parity_byte) {
+                        FLAG_PARITY
+                    } else {
+                        0
+                    }
+                    | if c_flag {
+                        FLAG_CARRY | FLAG_HALF_CARRY
+                    } else {
+                        0
+                    }
+                    | if n_flag { FLAG_ADD_OR_SUBTRACT } else { 0 };
+
+                self.handle_block_repeat(false, true, base_f)
+            }
+            0xAA => {
+                // IND
+                let value = self.execute_block_io_base(bus, true, false);
+
+                let modified_c = (self.c.wrapping_sub(1)) as u16;
+                let k = modified_c.wrapping_add(value as u16);
+
+                let c_flag = (k & 0x100) != 0;
+                let n_flag = (value & 0x80) != 0;
+                let parity_byte = (((k & 7) as u8) ^ self.b) & 0xFF;
+
+                let base_f = if self.b == 0 { FLAG_ZERO } else { 0 }
+                    | if (self.b & 0x80) != 0 { FLAG_SIGN } else { 0 }
+                    | if Self::parity(parity_byte) {
+                        FLAG_PARITY
+                    } else {
+                        0
+                    }
+                    | if c_flag {
+                        FLAG_CARRY | FLAG_HALF_CARRY
+                    } else {
+                        0
+                    }
+                    | if n_flag { FLAG_ADD_OR_SUBTRACT } else { 0 };
+
+                self.handle_block_repeat(false, false, base_f)
+            }
+            0xA3 => {
+                // OUTI
+                let value = self.execute_block_io_base(bus, false, true);
+
+                let k = (value as u16).wrapping_add(self.l as u16);
+                let c_flag = (k & 0x100) != 0;
+                let n_flag = (value & 0x80) != 0;
+
+                let base_f = if self.b == 0 { FLAG_ZERO } else { 0 }
+                    | if (self.b & 0x80) != 0 { FLAG_SIGN } else { 0 }
+                    | if Self::parity(((k & 0x07) as u8) ^ self.b) {
+                        FLAG_PARITY
+                    } else {
+                        0
+                    }
+                    | if c_flag {
+                        FLAG_CARRY | FLAG_HALF_CARRY
+                    } else {
+                        0
+                    }
+                    | if n_flag { FLAG_ADD_OR_SUBTRACT } else { 0 };
+
+                self.handle_block_repeat(false, true, base_f)
+            }
+            0xAB => {
+                // OUTD
+                let value = self.execute_block_io_base(bus, false, false);
+
+                let k = (value as u16).wrapping_add(self.l as u16);
+                let c_flag = (k & 0x100) != 0;
+                let n_flag = (value & 0x80) != 0;
+
+                let parity_byte = (((k & 7) as u8) ^ self.b) & 0xFF;
+                let base_f = if self.b == 0 { FLAG_ZERO } else { 0 }
+                    | if (self.b & 0x80) != 0 { FLAG_SIGN } else { 0 }
+                    | if Self::parity(parity_byte) {
+                        FLAG_PARITY
+                    } else {
+                        0
+                    }
+                    | if c_flag {
+                        FLAG_CARRY | FLAG_HALF_CARRY
+                    } else {
+                        0
+                    }
+                    | if n_flag { FLAG_ADD_OR_SUBTRACT } else { 0 };
+
+                self.handle_block_repeat(false, false, base_f)
+            }
+            0xB2 => {
+                // INIR
+                let value = self.execute_block_io_base(bus, true, true);
+
+                let modified_c = (self.c.wrapping_add(1)) as u16;
+                let k = modified_c.wrapping_add(value as u16);
+
+                let c_flag = (k & 0x100) != 0;
+                let n_flag = (value & 0x80) != 0;
+                let pf_base = Self::parity((((k & 7) as u8) ^ self.b) & 0xFF);
+
+                let (h_flag, pv_flag) = self.post_in_o_r(c_flag, value, c_flag, pf_base);
+
+                let base_f = if self.b == 0 { FLAG_ZERO } else { 0 }
+                    | if (self.b & 0x80) != 0 { FLAG_SIGN } else { 0 }
+                    | if h_flag { FLAG_HALF_CARRY } else { 0 }
+                    | if pv_flag { FLAG_PARITY } else { 0 }
+                    | if n_flag { FLAG_ADD_OR_SUBTRACT } else { 0 }
+                    | if c_flag { FLAG_CARRY } else { 0 };
+
+                self.handle_block_repeat(true, true, base_f)
+            }
+            0xBA => {
+                // INDR
+                let value = self.execute_block_io_base(bus, true, false);
+
+                let modified_c = (self.c.wrapping_sub(1)) as u16;
+                let k = modified_c.wrapping_add(value as u16);
+
+                let c_flag = (k & 0x100) != 0;
+                let n_flag = (value & 0x80) != 0;
+                let pf_base = Self::parity((((k & 7) as u8) ^ self.b) & 0xFF);
+
+                let (h_flag, pv_flag) = self.post_in_o_r(c_flag, value, c_flag, pf_base);
+
+                let base_f = if self.b == 0 { FLAG_ZERO } else { 0 }
+                    | if (self.b & 0x80) != 0 { FLAG_SIGN } else { 0 }
+                    | if h_flag { FLAG_HALF_CARRY } else { 0 }
+                    | if pv_flag { FLAG_PARITY } else { 0 }
+                    | if n_flag { FLAG_ADD_OR_SUBTRACT } else { 0 }
+                    | if c_flag { FLAG_CARRY } else { 0 };
+
+                self.handle_block_repeat(true, false, base_f)
+            }
+            0xB3 => {
+                // OTIR
+                let value = self.execute_block_io_base(bus, false, true);
+
+                let k = (value as u16).wrapping_add(self.l as u16);
+                let c_flag = (k & 0x100) != 0;
+                let n_flag = (value & 0x80) != 0;
+                let pf_base = Self::parity(((k & 0x07) as u8) ^ self.b);
+
+                let (h_flag, pv_flag) = self.post_in_o_r(c_flag, value, c_flag, pf_base);
+
+                let base_f = if self.b == 0 { FLAG_ZERO } else { 0 }
+                    | if (self.b & 0x80) != 0 { FLAG_SIGN } else { 0 }
+                    | if h_flag { FLAG_HALF_CARRY } else { 0 }
+                    | if pv_flag { FLAG_PARITY } else { 0 }
+                    | if n_flag { FLAG_ADD_OR_SUBTRACT } else { 0 }
+                    | if c_flag { FLAG_CARRY } else { 0 };
+
+                self.handle_block_repeat(true, true, base_f)
+            }
+            0xBB => {
+                // OTDR
+                let value = self.execute_block_io_base(bus, false, false);
+
+                let k = (value as u16).wrapping_add(self.l as u16);
+                let c_flag = (k & 0x100) != 0;
+                let n_flag = (value & 0x80) != 0;
+                let pf_base = Self::parity((((k & 7) as u8) ^ self.b) & 0xFF);
+
+                let (h_flag, pv_flag) = self.post_in_o_r(c_flag, value, c_flag, pf_base);
+
+                let base_f = if self.b == 0 { FLAG_ZERO } else { 0 }
+                    | if (self.b & 0x80) != 0 { FLAG_SIGN } else { 0 }
+                    | if h_flag { FLAG_HALF_CARRY } else { 0 }
+                    | if pv_flag { FLAG_PARITY } else { 0 }
+                    | if n_flag { FLAG_ADD_OR_SUBTRACT } else { 0 }
+                    | if c_flag { FLAG_CARRY } else { 0 };
+
+                self.handle_block_repeat(true, false, base_f)
+            }
+            _ => panic!("Unexpected ED opcode {opcode:02X}"),
+        }
     }
 }
 
@@ -1245,15 +1914,15 @@ mod tests {
     }
 
     macro_rules! z80_tests {
-    ($($name:ident => $file:expr),* $(,)?) => {
-        $(
-            #[test]
-            fn $name() {
-                execute_test_cases($file);
-            }
-        )*
-    };
-}
+        ($($name:ident => $file:expr),* $(,)?) => {
+            $(
+                #[test]
+                fn $name() {
+                    execute_test_cases($file);
+                }
+            )*
+        };
+    }
 
     fn execute_test_cases(test_file_name: &str) {
         let test_path = "tests/z80/v1";
@@ -1621,5 +2290,28 @@ mod tests {
         test_cb_f4 => "cb f4.json", test_cb_f5 => "cb f5.json", test_cb_f6 => "cb f6.json", test_cb_f7 => "cb f7.json",
         test_cb_f8 => "cb f8.json", test_cb_f9 => "cb f9.json", test_cb_fa => "cb fa.json", test_cb_fb => "cb fb.json",
         test_cb_fc => "cb fc.json", test_cb_fd => "cb fd.json", test_cb_fe => "cb fe.json", test_cb_ff => "cb ff.json",
+    }
+
+    z80_tests! {
+        test_ed_40 => "ed 40.json", test_ed_41 => "ed 41.json", test_ed_42 => "ed 42.json", test_ed_43 => "ed 43.json",
+        test_ed_44 => "ed 44.json", test_ed_45 => "ed 45.json", test_ed_46 => "ed 46.json", test_ed_47 => "ed 47.json",
+        test_ed_48 => "ed 48.json", test_ed_49 => "ed 49.json", test_ed_4a => "ed 4a.json", test_ed_4b => "ed 4b.json",
+        test_ed_4c => "ed 4c.json", test_ed_4d => "ed 4d.json", test_ed_4e => "ed 4e.json", test_ed_4f => "ed 4f.json",
+        test_ed_50 => "ed 50.json", test_ed_51 => "ed 51.json", test_ed_52 => "ed 52.json", test_ed_53 => "ed 53.json",
+        test_ed_54 => "ed 54.json", test_ed_55 => "ed 55.json", test_ed_56 => "ed 56.json", test_ed_57 => "ed 57.json",
+        test_ed_58 => "ed 58.json", test_ed_59 => "ed 59.json", test_ed_5a => "ed 5a.json", test_ed_5b => "ed 5b.json",
+        test_ed_5c => "ed 5c.json", test_ed_5d => "ed 5d.json", test_ed_5e => "ed 5e.json", test_ed_5f => "ed 5f.json",
+        test_ed_60 => "ed 60.json", test_ed_61 => "ed 61.json", test_ed_62 => "ed 62.json", test_ed_63 => "ed 63.json",
+        test_ed_64 => "ed 64.json", test_ed_65 => "ed 65.json", test_ed_66 => "ed 66.json", test_ed_67 => "ed 67.json",
+        test_ed_68 => "ed 68.json", test_ed_69 => "ed 69.json", test_ed_6a => "ed 6a.json", test_ed_6b => "ed 6b.json",
+        test_ed_6c => "ed 6c.json", test_ed_6d => "ed 6d.json", test_ed_6e => "ed 6e.json", test_ed_6f => "ed 6f.json",
+        test_ed_70 => "ed 70.json", test_ed_71 => "ed 71.json", test_ed_72 => "ed 72.json", test_ed_73 => "ed 73.json",
+        test_ed_74 => "ed 74.json", test_ed_75 => "ed 75.json", test_ed_76 => "ed 76.json", test_ed_77 => "ed 77.json",
+        test_ed_78 => "ed 78.json", test_ed_79 => "ed 79.json", test_ed_7a => "ed 7a.json", test_ed_7b => "ed 7b.json",
+        test_ed_7c => "ed 7c.json", test_ed_7d => "ed 7d.json", test_ed_7e => "ed 7e.json", test_ed_7f => "ed 7f.json",
+        test_ed_a0 => "ed a0.json", test_ed_a1 => "ed a1.json", test_ed_a2 => "ed a2.json", test_ed_a3 => "ed a3.json",
+        test_ed_a8 => "ed a8.json", test_ed_a9 => "ed a9.json", test_ed_aa => "ed aa.json", test_ed_ab => "ed ab.json",
+        test_ed_b0 => "ed b0.json", test_ed_b1 => "ed b1.json", test_ed_b2 => "ed b2.json", test_ed_b3 => "ed b3.json",
+        test_ed_b8 => "ed b8.json", test_ed_b9 => "ed b9.json", test_ed_ba => "ed ba.json", test_ed_bb => "ed bb.json",
     }
 }
