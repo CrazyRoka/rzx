@@ -55,6 +55,9 @@ pub struct Z80 {
     im: InterruptMode,
     iff1: bool,
     iff2: bool,
+    pending_nmi: bool,
+    pending_int: Option<u8>,
+    halted: bool,
 }
 
 impl Z80 {
@@ -69,7 +72,7 @@ impl Z80 {
             h: 0xFF,
             l: 0xFF,
             i: 0xFF,
-            r: 0xFF,
+            r: 0,
             p: true,
             w: 0xFF,
             z: 0xFF,
@@ -92,13 +95,61 @@ impl Z80 {
             im: InterruptMode::IM0,
             iff1: false,
             iff2: false,
+            pending_nmi: false,
+            pending_int: None,
+            halted: false,
         }
     }
 
     pub fn execute<B: Bus>(&mut self, bus: &mut B) -> u64 {
+        if self.pending_nmi {
+            self.pending_nmi = false;
+            self.r = (((self.r & 0x7F) + 1) & 0x7F) | (self.r & 0x80);
+            self.iff1 = false;
+            self.halted = false;
+            self.push_word(bus, self.pc);
+            self.set_wz(0x0066);
+            self.pc = 0x0066;
+            return 11;
+        }
+
+        if let Some(data) = self.pending_int
+            && !self.ei
+            && self.iff1
+        {
+            self.pending_int = None;
+            self.r = (((self.r & 0x7F) + 1) & 0x7F) | (self.r & 0x80);
+            self.halted = false;
+            self.iff1 = false;
+            self.iff2 = false;
+            return match self.im {
+                InterruptMode::IM0 => {
+                    dbg!(
+                        "WARNING: IM0 called, check if opcode is 1 byte width or not - maybe we need to refactor",
+                        data
+                    );
+                    2 + self.step(bus, data)
+                }
+                InterruptMode::IM1 => 2 + self.step(bus, 0xFF),
+                InterruptMode::IM2 => {
+                    self.push_word(bus, self.pc);
+                    let addr = ((self.i as u16) << 8) | data as u16;
+                    self.set_wz(addr);
+                    let low = bus.read(addr);
+                    let high = bus.read(addr.wrapping_add(1));
+                    self.pc = ((high as u16) << 8) | low as u16;
+                    19
+                }
+            };
+        }
+
+        if self.halted {
+            return 4;
+        }
+
+        self.r = (((self.r & 0x7F) + 1) & 0x7F) | (self.r & 0x80);
         let opcode = self.read_byte(bus);
         let next_opcode = bus.read(self.pc);
-        self.r = (((self.r & 0x7F) + 1) & 0x7F) | (self.r & 0x80);
         self.ei = false;
         self.p = false;
         let old_f = self.f;
@@ -402,6 +453,18 @@ impl Z80 {
                 0
             };
         self.q = !self.q;
+    }
+
+    pub fn request_nmi(&mut self) {
+        self.pending_nmi = true;
+    }
+
+    pub fn request_int(&mut self, data: u8) {
+        self.pending_int = Some(data);
+    }
+
+    pub fn is_halted(&self) -> bool {
+        self.halted
     }
 
     fn step<B: Bus>(&mut self, bus: &mut B, opcode: u8) -> u64 {
@@ -778,8 +841,7 @@ impl Z80 {
             }
             0x76 => {
                 // HALT
-                // TODO: handle halt
-                dbg!("HALT CALLED");
+                self.halted = true;
                 4
             }
             0x80..=0xBF => {
@@ -2201,7 +2263,10 @@ mod tests {
 
     use serde::Deserialize;
 
-    use crate::{bus::Bus, cpu::Z80};
+    use crate::{
+        bus::Bus,
+        cpu::{InterruptMode, Z80},
+    };
 
     #[derive(Default, PartialEq, Eq, Debug)]
     struct TestBus {
@@ -2225,6 +2290,561 @@ mod tests {
         fn port_write(&mut self, port: u16, value: u8) {
             self.port_inputs.insert(port, value);
         }
+    }
+
+    #[test]
+    fn test_nmi() {
+        let mut cpu = Z80::new();
+        let mut bus = TestBus::default();
+
+        cpu.pc = 0x1000;
+        cpu.sp = 0x2000;
+        cpu.iff1 = true;
+        cpu.iff2 = true;
+
+        let r_before = cpu.r;
+        cpu.request_nmi();
+
+        let cycles = cpu.execute(&mut bus);
+
+        assert_eq!(cpu.pc, 0x0066);
+        assert_eq!(cpu.sp, 0x1FFE);
+        assert_eq!(bus.read(0x1FFF), 0x10);
+        assert_eq!(bus.read(0x1FFE), 0x00);
+        assert_eq!(cpu.iff1, false); // NMI disables maskable interrupts
+        assert_eq!(cpu.iff2, true); // but preserves IFF2
+        assert_eq!(cpu.r, r_before.wrapping_add(1)); // R is increased by 1
+        assert_eq!(cycles, 11);
+    }
+
+    #[test]
+    fn nmi_calls_0x0066() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = true;
+        bus.write(0x0066, 0xED);
+        bus.write(0x0067, 0x45); // RETN
+        cpu.request_nmi();
+        cpu.execute(&mut bus);
+
+        assert_eq!(cpu.pc, 0x0066);
+    }
+
+    #[test]
+    fn nmi_clears_iff1_only() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = true;
+        cpu.iff2 = true;
+        bus.write(0x0066, 0xED);
+        bus.write(0x0067, 0x45);
+        cpu.request_nmi();
+        cpu.execute(&mut bus);
+
+        assert_eq!(cpu.iff1, false);
+        assert_eq!(cpu.iff2, true);
+    }
+
+    #[test]
+    fn retn_restores_iff1_from_iff2() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = false;
+        cpu.iff2 = true;
+        cpu.sp = 0x1000;
+        bus.write(0x0FFE, 0x00);
+        bus.write(0x0FFF, 0x05);
+        bus.write(0x0000, 0xED);
+        bus.write(0x0001, 0x45);
+        cpu.execute(&mut bus);
+        assert_eq!(cpu.iff1, true);
+    }
+
+    #[test]
+    fn nmi_pushes_pc_to_stack() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = true;
+        cpu.sp = 0x1000;
+        cpu.pc = 0x0500;
+        bus.write(0x0066, 0xED);
+        bus.write(0x0067, 0x45);
+        cpu.request_nmi();
+        cpu.execute(&mut bus);
+
+        assert_eq!(bus.read(0x0FFE), 0x00);
+        assert_eq!(bus.read(0x0FFF), 0x05);
+        assert_eq!(cpu.sp, 0x0FFE);
+    }
+
+    #[test]
+    fn nmi_costs_11_t_states() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = true;
+        bus.write(0x0066, 0xED);
+        bus.write(0x0067, 0x45);
+        cpu.request_nmi();
+        let cycles = cpu.execute(&mut bus);
+
+        assert_eq!(cycles, 11);
+    }
+
+    #[test]
+    fn nmi_increases_r_register() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = true;
+        cpu.r = 0x00;
+        bus.write(0x0066, 0xED);
+        bus.write(0x0067, 0x45);
+        cpu.request_nmi();
+        cpu.execute(&mut bus);
+
+        assert_eq!(cpu.r & 0x7F, 0x01);
+    }
+
+    #[test]
+    fn nmi_has_priority_over_int() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = true;
+        cpu.im = InterruptMode::IM1;
+        bus.write(0x0066, 0xC9);
+        bus.write(0x0038, 0xC9);
+        cpu.request_nmi();
+        cpu.request_int(0xFF);
+        cpu.execute(&mut bus);
+
+        assert_eq!(cpu.pc, 0x0066);
+    }
+
+    #[test]
+    fn nested_nmi_does_not_overwrite_iff2() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = true;
+        cpu.iff2 = true;
+        bus.write(0x0066, 0xFB); // EI
+        bus.write(0x0067, 0x76); // HALT
+        bus.write(0x0068, 0xED); // RETN
+        bus.write(0x0069, 0x45);
+        cpu.request_nmi();
+        cpu.execute(&mut bus);
+
+        assert_eq!(cpu.iff1, false);
+        assert_eq!(cpu.iff2, true);
+        cpu.execute(&mut bus); // EI
+        cpu.execute(&mut bus); // HALT
+        cpu.request_nmi();
+        cpu.execute(&mut bus);
+        assert_eq!(cpu.iff2, true);
+    }
+
+    #[test]
+    fn int_im1_calls_0x0038() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = true;
+        cpu.im = InterruptMode::IM1;
+        bus.write(0x0038, 0xC9);
+        cpu.request_int(0xFF);
+        cpu.execute(&mut bus);
+
+        assert_eq!(cpu.pc, 0x0038);
+    }
+
+    #[test]
+    fn int_im1_ignores_data_bus() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = true;
+        cpu.im = InterruptMode::IM1;
+        bus.write(0x0038, 0xC9);
+        cpu.request_int(0x00);
+        cpu.execute(&mut bus);
+
+        assert_eq!(cpu.pc, 0x0038);
+    }
+
+    #[test]
+    fn int_im1_clears_both_iff() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = true;
+        cpu.iff2 = true;
+        cpu.im = InterruptMode::IM1;
+        bus.write(0x0038, 0xC9);
+        cpu.request_int(0xFF);
+        cpu.execute(&mut bus);
+
+        assert_eq!(cpu.iff1, false);
+        assert_eq!(cpu.iff2, false);
+    }
+
+    #[test]
+    fn int_im1_costs_13_t_states() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = true;
+        cpu.im = InterruptMode::IM1;
+        bus.write(0x0038, 0xC9);
+        cpu.request_int(0xFF);
+        let cycles = cpu.execute(&mut bus);
+
+        assert_eq!(cycles, 13);
+    }
+
+    #[test]
+    fn int_increases_r_register() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = true;
+        cpu.im = InterruptMode::IM1;
+        cpu.r = 0x00;
+        bus.write(0x0038, 0xC9);
+        cpu.request_int(0xFF);
+        cpu.execute(&mut bus);
+
+        assert_eq!(cpu.r & 0x7F, 0x01);
+    }
+
+    #[test]
+    fn test_interrupt_im1() {
+        let mut cpu = Z80::new();
+        let mut bus = TestBus::default();
+
+        cpu.pc = 0x1000;
+        cpu.sp = 0x2000;
+        cpu.iff1 = true;
+        cpu.iff2 = true;
+        cpu.im = InterruptMode::IM1;
+
+        let r_before = cpu.r;
+        cpu.request_int(0xFF);
+
+        let cycles = cpu.execute(&mut bus);
+
+        assert_eq!(cpu.pc, 0x0038);
+        assert_eq!(cpu.sp, 0x1FFE);
+        assert_eq!(bus.read(0x1FFF), 0x10);
+        assert_eq!(bus.read(0x1FFE), 0x00);
+        assert_eq!(cpu.iff1, false);
+        assert_eq!(cpu.iff2, false);
+        assert_eq!(cpu.r, r_before.wrapping_add(1));
+        assert_eq!(cycles, 13);
+    }
+
+    #[test]
+    fn int_im2_uses_vector_table() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = true;
+        cpu.im = InterruptMode::IM2;
+        cpu.i = 0x80;
+        bus.write(0x80FF, 0x00);
+        bus.write(0x8100, 0x10);
+        bus.write(0x1000, 0xC9);
+        cpu.request_int(0xFF);
+        cpu.execute(&mut bus);
+
+        assert_eq!(cpu.pc, 0x1000);
+    }
+
+    #[test]
+    fn int_im2_does_not_mask_low_bit_of_data_bus() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = true;
+        cpu.im = InterruptMode::IM2;
+        cpu.i = 0x80;
+        bus.write(0x8001, 0x00);
+        bus.write(0x8002, 0x20);
+        bus.write(0x2000, 0xC9);
+        cpu.request_int(0x01);
+        cpu.execute(&mut bus);
+
+        assert_eq!(cpu.pc, 0x2000);
+    }
+
+    #[test]
+    fn int_im2_costs_19_t_states() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = true;
+        cpu.im = InterruptMode::IM2;
+        cpu.i = 0x80;
+        bus.write(0x80FF, 0x00);
+        bus.write(0x8000, 0x10);
+        bus.write(0x1000, 0xC9);
+        cpu.request_int(0xFF);
+        let cycles = cpu.execute(&mut bus);
+
+        assert_eq!(cycles, 19);
+    }
+
+    #[test]
+    fn int_blocked_when_iff1_clear() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = false;
+        cpu.im = InterruptMode::IM1;
+        bus.write(0x0000, 0x00);
+        bus.write(0x0038, 0xC9);
+        cpu.request_int(0xFF);
+        cpu.execute(&mut bus);
+
+        assert_eq!(cpu.pc, 0x0001);
+    }
+
+    #[test]
+    fn int_not_accepted_directly_after_ei() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = false;
+        cpu.im = InterruptMode::IM1;
+        bus.write(0x0000, 0xFB); // EI
+        bus.write(0x0001, 0x00); // NOP
+        bus.write(0x0038, 0xC9);
+        cpu.request_int(0xFF);
+        cpu.execute(&mut bus); // EI
+        assert_eq!(cpu.iff1, true);
+        cpu.execute(&mut bus); // NOP - interrupt accepted after this
+        cpu.execute(&mut bus);
+
+        assert_eq!(cpu.pc, 0x0038);
+    }
+
+    #[test]
+    fn int_not_accepted_directly_after_di() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = true;
+        cpu.im = InterruptMode::IM1;
+        bus.write(0x0000, 0xF3); // DI
+        bus.write(0x0001, 0x00); // NOP
+        bus.write(0x0038, 0xC9);
+        cpu.execute(&mut bus); // DI
+        assert_eq!(cpu.iff1, false);
+        cpu.request_int(0xFF);
+        cpu.execute(&mut bus); // NOP
+
+        assert_eq!(cpu.pc, 0x0002);
+    }
+
+    #[test]
+    fn test_interrupt_im2() {
+        let mut cpu = Z80::new();
+        let mut bus = TestBus::default();
+
+        cpu.pc = 0x1000;
+        cpu.sp = 0x2000;
+        cpu.iff1 = true;
+        cpu.iff2 = true;
+        cpu.im = InterruptMode::IM2;
+        cpu.i = 0x01;
+
+        // Setup the vector table at 0x01AA
+        bus.write(0x01AA, 0x34);
+        bus.write(0x01AB, 0x12);
+
+        let r_before = cpu.r;
+        cpu.request_int(0xAA);
+
+        let cycles = cpu.execute(&mut bus);
+
+        assert_eq!(cpu.pc, 0x1234);
+        assert_eq!(cpu.sp, 0x1FFE);
+        assert_eq!(bus.read(0x1FFF), 0x10);
+        assert_eq!(bus.read(0x1FFE), 0x00);
+        assert_eq!(cpu.iff1, false);
+        assert_eq!(cpu.iff2, false);
+        assert_eq!(cpu.r, r_before.wrapping_add(1));
+        assert_eq!(cycles, 19);
+    }
+
+    #[test]
+    fn int_im0_executes_instruction_on_bus() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = true;
+        cpu.im = InterruptMode::IM0;
+        bus.write(0x0038, 0xC9);
+        cpu.request_int(0xFF);
+        cpu.execute(&mut bus);
+
+        assert_eq!(cpu.pc, 0x0038);
+    }
+
+    #[test]
+    fn int_im0_costs_13_t_states_for_rst() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = true;
+        cpu.im = InterruptMode::IM0;
+        bus.write(0x0038, 0xC9);
+        cpu.request_int(0xFF);
+        let cycles = cpu.execute(&mut bus);
+
+        assert_eq!(cycles, 13);
+    }
+
+    #[test]
+    fn test_interrupt_im0() {
+        let mut cpu = Z80::new();
+        let mut bus = TestBus::default();
+
+        cpu.pc = 0x1000;
+        cpu.sp = 0x2000;
+        cpu.iff1 = true;
+        cpu.iff2 = true;
+        cpu.im = InterruptMode::IM0;
+
+        let r_before = cpu.r;
+        cpu.request_int(0xD7); // RST 10h
+
+        let cycles = cpu.execute(&mut bus);
+
+        assert_eq!(cpu.pc, 0x0010);
+        assert_eq!(cpu.sp, 0x1FFE);
+        assert_eq!(bus.read(0x1FFF), 0x10);
+        assert_eq!(bus.read(0x1FFE), 0x00);
+        assert_eq!(cpu.iff1, false);
+        assert_eq!(cpu.iff2, false);
+        assert_eq!(cpu.r, r_before.wrapping_add(1));
+        assert_eq!(cycles, 13);
+    }
+
+    #[test]
+    fn halt_does_not_advance_pc() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        bus.write(0x0000, 0x76);
+        cpu.execute(&mut bus);
+        assert_eq!(cpu.pc, 0x0001);
+    }
+
+    #[test]
+    fn halt_sets_halt_line() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        bus.write(0x0000, 0x76);
+        cpu.execute(&mut bus);
+        assert!(cpu.halted);
+    }
+
+    #[test]
+    fn halt_exits_on_nmi() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        bus.write(0x0000, 0x76);
+        bus.write(0x0066, 0xC9);
+        cpu.execute(&mut bus);
+        cpu.request_nmi();
+        cpu.execute(&mut bus);
+
+        assert_eq!(cpu.pc, 0x0066);
+        cpu.execute(&mut bus); // RET
+        assert_eq!(cpu.pc, 0x0001);
+    }
+
+    #[test]
+    fn halt_exits_on_int_when_enabled() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = true;
+        cpu.im = InterruptMode::IM1;
+        bus.write(0x0000, 0x76);
+        bus.write(0x0038, 0xC9);
+        cpu.execute(&mut bus);
+        cpu.request_int(0xFF);
+        cpu.execute(&mut bus);
+
+        assert_eq!(cpu.pc, 0x0038);
+    }
+
+    #[test]
+    fn halt_does_not_exit_on_int_when_disabled() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = false;
+        cpu.im = InterruptMode::IM1;
+        bus.write(0x0000, 0x76);
+        bus.write(0x0038, 0xC9);
+        cpu.execute(&mut bus);
+        cpu.request_int(0xFF);
+        cpu.execute(&mut bus);
+
+        assert_eq!(cpu.pc, 0x0001);
+    }
+
+    #[test]
+    fn halt_clears_halt_line_on_interrupt() {
+        let mut bus = TestBus::default();
+        let mut cpu = Z80::new();
+        cpu.iff1 = true;
+        cpu.im = InterruptMode::IM1;
+        bus.write(0x0000, 0x76);
+        bus.write(0x0038, 0xC9);
+        cpu.execute(&mut bus);
+        assert!(cpu.halted);
+        cpu.request_int(0xFF);
+        cpu.execute(&mut bus);
+
+        assert!(!cpu.halted);
+    }
+
+    #[test]
+    fn test_halt_and_interrupt() {
+        let mut cpu = Z80::new();
+        let mut bus = TestBus::default();
+
+        cpu.pc = 0x1000;
+        bus.write(0x1000, 0x76); // HALT
+
+        let cycles = cpu.execute(&mut bus);
+        assert_eq!(cycles, 4);
+        assert!(cpu.is_halted());
+        assert_eq!(cpu.pc, 0x1001);
+
+        let cycles2 = cpu.execute(&mut bus);
+        assert_eq!(cycles2, 4);
+        assert!(cpu.is_halted());
+        assert_eq!(cpu.pc, 0x1001);
+
+        cpu.request_nmi();
+        let cycles3 = cpu.execute(&mut bus);
+        assert_eq!(cycles3, 11);
+        assert_eq!(cpu.pc, 0x0066);
+        assert!(!cpu.is_halted());
+    }
+
+    #[test]
+    fn test_ei_delays_interrupt() {
+        let mut cpu = Z80::new();
+        let mut bus = TestBus::default();
+
+        cpu.pc = 0x1000;
+        bus.write(0x1000, 0xFB); // EI
+        bus.write(0x1001, 0x00); // NOP
+
+        cpu.iff1 = false;
+        cpu.iff2 = false;
+
+        cpu.execute(&mut bus); // Execute EI
+        assert_eq!(cpu.pc, 0x1001);
+        assert_eq!(cpu.iff1, true);
+
+        cpu.request_int(0xFF);
+        cpu.im = InterruptMode::IM1;
+
+        let cycles = cpu.execute(&mut bus); // Should execute NOP, ignoring INT for 1 instruction
+        assert_eq!(cycles, 4);
+        assert_eq!(cpu.pc, 0x1002);
+
+        let cycles_int = cpu.execute(&mut bus); // Now accept INT
+        assert_eq!(cycles_int, 13);
+        assert_eq!(cpu.pc, 0x0038);
     }
 
     #[derive(Deserialize)]
@@ -2374,6 +2994,8 @@ mod tests {
 
             let cycles = cpu.execute(&mut bus);
 
+            let mut expected_cpu = case.final_state.create_cpu();
+            expected_cpu.halted = cpu.halted; // This test doesn't care about HALTED boolean
             assert_eq!(
                 case.cycles.len() as u64,
                 cycles,
@@ -2388,8 +3010,7 @@ mod tests {
                 case.name
             );
             assert_eq!(
-                case.final_state.create_cpu(),
-                cpu,
+                expected_cpu, cpu,
                 "Test Case '{}': CPU state doesn't match the expected final state",
                 case.name
             );
