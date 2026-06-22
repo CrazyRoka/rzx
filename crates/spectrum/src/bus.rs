@@ -2,13 +2,14 @@ use std::{cell::RefCell, rc::Rc};
 
 use z80::Bus;
 
-use crate::Keyboard;
+use crate::{Keyboard, TapePlayer};
 
 pub struct Spectrum16k {
     rom: [u8; 0x4000], // 0x0000 – 0x3FFF
     ram: [u8; 0x4000], // 0x4000 - 0x7FFF
     //IO
     keyboard: Rc<RefCell<Keyboard>>,
+    tape_player: Rc<RefCell<TapePlayer>>,
     // ULA
     border_color: u8,
     mic: bool,
@@ -16,7 +17,11 @@ pub struct Spectrum16k {
 }
 
 impl Spectrum16k {
-    pub fn new(rom: &[u8], keyboard: Rc<RefCell<Keyboard>>) -> Self {
+    pub fn new(
+        rom: &[u8],
+        keyboard: Rc<RefCell<Keyboard>>,
+        tape_player: Rc<RefCell<TapePlayer>>,
+    ) -> Self {
         assert_eq!(rom.len(), 0x4000, "16K model requires a 16KB ROM");
         let mut rom_clone = [0; 0x4000];
         rom_clone.copy_from_slice(rom);
@@ -25,6 +30,7 @@ impl Spectrum16k {
             rom: rom_clone,
             ram: [0xFF; 0x4000],
             keyboard,
+            tape_player,
             border_color: 0,
             mic: false,
             ear: false,
@@ -50,7 +56,7 @@ impl Bus for Spectrum16k {
             0x0000..=0x3FFF => self.rom[addr as usize],
             0x4000..=0x7FFF => self.ram[(addr & 0x3FFF) as usize],
             0x8000..=0xFFFF => {
-                dbg!("Attempt to read upper RAM area on 16K model", addr);
+                // dbg!("Attempt to read upper RAM area on 16K model", addr);
                 0xFF
             }
         }
@@ -59,22 +65,22 @@ impl Bus for Spectrum16k {
     fn write(&mut self, addr: u16, value: u8) {
         match addr {
             0x0000..=0x3FFF => {
-                dbg!("Attempt to overwrite ROM area", addr, value);
+                // dbg!("Attempt to overwrite ROM area", addr, value);
             }
             0x4000..=0x7FFF => self.ram[(addr & 0x3FFF) as usize] = value,
             0x8000..=0xFFFF => {
-                dbg!(
-                    "Attempt to overwrite upper RAM area on 16K model",
-                    addr,
-                    value
-                );
+                // dbg!(
+                //     "Attempt to overwrite upper RAM area on 16K model",
+                //     addr,
+                //     value
+                // );
             }
         }
     }
 
     fn port_read(&self, port: u16) -> u8 {
         if (port & 0xFF) != 0xFE {
-            dbg!("Unexpectede port read at address {port:#04X}");
+            // dbg!("Unexpectede port read at address {port:#04X}");
             // TODO: handle floating bus
             return 0xFF;
         }
@@ -87,14 +93,14 @@ impl Bus for Spectrum16k {
         }
 
         keyboard_state |= 0xA0;
-        keyboard_state |= (self.ear as u8) << 6;
+        keyboard_state |= ((self.ear ^ self.tape_player.borrow().ear()) as u8) << 6;
 
         keyboard_state
     }
 
     fn port_write(&mut self, port: u16, value: u8) {
         if (port & 0x01) == 1 {
-            dbg!("Unexpected even port write", port, value);
+            // dbg!("Unexpected even port write", port, value);
             return;
         }
 
@@ -102,18 +108,18 @@ impl Bus for Spectrum16k {
         self.mic = (value & 0x08) == 0x08;
         self.ear = (value & 0x10) == 0x10;
 
-        dbg!(
-            "Received port write",
-            self.border_color,
-            self.mic,
-            self.ear,
-            port,
-            value
-        );
+        // dbg!(
+        //     "Received port write",
+        //     self.border_color,
+        //     self.mic,
+        //     self.ear,
+        //     port,
+        //     value
+        // );
 
-        if (port & 0xFF) != 0xFE {
-            dbg!("Received unexpected port write", port, value);
-        }
+        // if (port & 0xFF) != 0xFE {
+        //     dbg!("Received unexpected port write", port, value);
+        // }
     }
 }
 
@@ -132,8 +138,22 @@ mod tests {
         Rc::new(RefCell::new(Keyboard::new()))
     }
 
+    fn make_tape() -> Rc<RefCell<TapePlayer>> {
+        let mut block = Vec::new();
+        let payload_len = 2;
+
+        block.push((payload_len & 0xFF) as u8);
+        block.push(((payload_len >> 8) & 0xFF) as u8);
+        block.push(0x00);
+
+        let checksum = 0x00;
+        block.push(checksum);
+
+        Rc::new(RefCell::new(TapePlayer::from_tape(&block)))
+    }
+
     fn make_spectrum16k() -> Spectrum16k {
-        Spectrum16k::new(&make_rom(), make_keyboard())
+        Spectrum16k::new(&make_rom(), make_keyboard(), make_tape())
     }
 
     // -----------------------------------------------------------------
@@ -143,19 +163,19 @@ mod tests {
     #[test]
     fn new_accepts_exactly_16kb_rom() {
         // Should not panic
-        let _mem = Spectrum16k::new(&[0u8; 0x4000], make_keyboard());
+        let _mem = Spectrum16k::new(&[0u8; 0x4000], make_keyboard(), make_tape());
     }
 
     #[test]
     #[should_panic(expected = "16K model requires a 16KB ROM")]
     fn new_rejects_rom_shorter_than_16kb() {
-        let _mem = Spectrum16k::new(&[0u8; 0x3FFF], make_keyboard());
+        let _mem = Spectrum16k::new(&[0u8; 0x3FFF], make_keyboard(), make_tape());
     }
 
     #[test]
     #[should_panic(expected = "16K model requires a 16KB ROM")]
     fn new_rejects_rom_longer_than_16kb() {
-        let _mem = Spectrum16k::new(&[0u8; 0x4001], make_keyboard());
+        let _mem = Spectrum16k::new(&[0u8; 0x4001], make_keyboard(), make_tape());
     }
 
     // -----------------------------------------------------------------
@@ -463,6 +483,16 @@ mod tests {
         assert_eq!(mem.border_color(), 5);
         assert!(!mem.mic_state());
         assert!(!mem.ear_state());
+    }
+
+    #[test]
+    fn port_fe_read_port_ear_from_tape() {
+        let mem = make_spectrum16k();
+        mem.tape_player.borrow_mut().play();
+        assert!((mem.port_read(0xFFFE) & 0x40) == 0);
+
+        mem.tape_player.borrow_mut().advance(8063);
+        assert!((mem.port_read(0xFFFE) & 0x40) != 0);
     }
 
     // -----------------------------------------------------------------

@@ -1,21 +1,26 @@
 use std::{cell::RefCell, env::args, fs, io::Error, process::exit, rc::Rc, time::Instant};
 
 use minifb::{Key, KeyRepeat, Scale, Window, WindowOptions};
-use spectrum::{Keyboard, Spectrum16k, SpectrumKey, ULA, WINDOW_HEIGHT, WINDOW_WIDTH};
+use spectrum::{Keyboard, Spectrum16k, SpectrumKey, TapePlayer, ULA, WINDOW_HEIGHT, WINDOW_WIDTH};
 use z80::{Bus, Z80};
 
 fn main() -> Result<(), Error> {
-    if args().len() != 2 {
-        eprintln!("Expected ROM path as argument.");
+    if args().len() != 3 {
+        eprintln!("Expected ROM path and TAP path as argument.");
         exit(-1);
     }
 
-    let rom_path = args().last().expect("Argument should be present");
+    let rom_path = args().nth(1).expect("Argument should be present");
     println!("Loading ROM from path: {}", rom_path);
-
     let rom_bytes = fs::read(rom_path)?;
+
+    let tap_path = args().nth(2).expect("Argument should be present");
+    println!("Loading TAP from path: {}", tap_path);
+    let tap_bytes = fs::read(tap_path)?;
+    let tape_player = Rc::new(RefCell::new(TapePlayer::from_tape(&tap_bytes)));
+
     let keyboard = Rc::new(RefCell::new(Keyboard::new()));
-    let mut bus = Spectrum16k::new(&rom_bytes, Rc::clone(&keyboard));
+    let mut bus = Spectrum16k::new(&rom_bytes, Rc::clone(&keyboard), Rc::clone(&tape_player));
     let mut ula = ULA::new();
     let mut cpu = Z80::new();
 
@@ -56,8 +61,17 @@ fn main() -> Result<(), Error> {
             }
         }
 
+        if window.is_key_pressed(Key::F2, KeyRepeat::No) {
+            if tape_player.borrow().is_playing() {
+                tape_player.borrow_mut().stop();
+            } else {
+                tape_player.borrow_mut().play();
+            }
+        }
+
         loop {
             let cycles = cpu.execute(&mut bus);
+            tape_player.borrow_mut().advance(cycles);
             if ula.render(&mut buffer, cycles, &bus) {
                 cpu.request_int(0xFF);
                 break;
