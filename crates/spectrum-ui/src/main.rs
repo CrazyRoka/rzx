@@ -1,10 +1,19 @@
 use std::{cell::RefCell, env::args, fs, io::Error, process::exit, rc::Rc, time::Instant};
 
-use minifb::{Key, KeyRepeat, Scale, Window, WindowOptions};
-use spectrum::{
-    Keyboard, Spectrum, SpectrumKey, SpectrumMemory, TapePlayer, ULA, WINDOW_HEIGHT, WINDOW_WIDTH,
+use cpal::{
+    BufferSize, OutputCallbackInfo, StreamConfig,
+    traits::{DeviceTrait, HostTrait, StreamTrait},
 };
-use z80::{Bus, Z80};
+use minifb::{Key, KeyRepeat, Scale, Window, WindowOptions};
+use ringbuf::{
+    HeapRb,
+    traits::{Consumer, Producer, Split},
+};
+use spectrum::{
+    AUDIO_RATE, Keyboard, Spectrum, SpectrumKey, SpectrumMemory, TapePlayer, ULA, WINDOW_HEIGHT,
+    WINDOW_WIDTH,
+};
+use z80::Z80;
 
 fn main() -> Result<(), Error> {
     if args().len() != 4 {
@@ -29,6 +38,32 @@ fn main() -> Result<(), Error> {
     println!("Loading TAP from path: {}", tap_path);
     let tap_bytes = fs::read(tap_path)?;
     let tape_player = Rc::new(RefCell::new(TapePlayer::from_tape(&tap_bytes)));
+
+    let (mut prod, mut cons) = HeapRb::<f32>::new(4096).split();
+
+    let host = cpal::default_host();
+    let device = host
+        .default_output_device()
+        .expect("Default Audio device can't be found");
+    let config = StreamConfig {
+        channels: 1,
+        sample_rate: AUDIO_RATE as u32,
+        buffer_size: BufferSize::Default,
+    };
+
+    let stream = device
+        .build_output_stream(
+            config,
+            move |data: &mut [f32], _: &OutputCallbackInfo| {
+                for sample in data {
+                    *sample = cons.try_pop().unwrap_or(0.0);
+                }
+            },
+            |err| eprintln!("Audio stream error: {err}"),
+            None,
+        )
+        .expect("Failed to create Audio stream");
+    stream.play().expect("Failed to play Audio stream");
 
     let keyboard = Rc::new(RefCell::new(Keyboard::new()));
     let mut bus = Spectrum::new(memory, Rc::clone(&keyboard), Rc::clone(&tape_player));
@@ -82,12 +117,16 @@ fn main() -> Result<(), Error> {
 
         loop {
             let cycles = cpu.execute(&mut bus);
+            bus.step(cycles);
             tape_player.borrow_mut().advance(cycles);
             if ula.render(&mut buffer, cycles, &bus) {
                 cpu.request_int(0xFF);
                 break;
             }
         }
+
+        let audio_samples = bus.consume_audio();
+        prod.push_slice(audio_samples);
 
         if let Err(err) = window.update_with_buffer(&buffer, WINDOW_WIDTH, WINDOW_HEIGHT) {
             panic!("Failed to update window: {}", err);

@@ -7,3 +7,5 @@ edition = "2024"
 z80 = { path = "../z80" }
 spectrum = { path = "../spectrum" }
 minifb = "0.28"
+cpal = "0.18.1"
+ringbuf = "0.5.0"

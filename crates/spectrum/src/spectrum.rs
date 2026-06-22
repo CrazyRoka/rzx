@@ -1,8 +1,9 @@
+use crate::{Keyboard, TapePlayer, memory::SpectrumMemory};
 use std::{cell::RefCell, rc::Rc};
-
 use z80::Bus;
 
-use crate::{Keyboard, TapePlayer, memory::SpectrumMemory};
+const CPU_FREQUENCY: usize = 3_500_000;
+pub const AUDIO_RATE: usize = 48_000;
 
 pub struct Spectrum {
     memory: SpectrumMemory,
@@ -13,6 +14,10 @@ pub struct Spectrum {
     border_color: u8,
     mic: bool,
     ear: bool,
+    // Audio
+    cycles: usize,
+    audio_idx: u16,
+    audio_buffer: [f32; 2000],
 }
 
 impl Spectrum {
@@ -28,6 +33,9 @@ impl Spectrum {
             border_color: 0,
             mic: false,
             ear: false,
+            cycles: 0,
+            audio_idx: 0,
+            audio_buffer: [0.0; 2000],
         }
     }
 
@@ -36,11 +44,29 @@ impl Spectrum {
     }
 
     pub fn ear_state(&self) -> bool {
-        self.ear
+        self.ear ^ self.tape_player.borrow().ear()
     }
 
     pub fn mic_state(&self) -> bool {
         self.mic
+    }
+
+    pub fn step(&mut self, cycles: u64) {
+        self.cycles += AUDIO_RATE * cycles as usize;
+        while self.cycles >= CPU_FREQUENCY {
+            self.cycles -= CPU_FREQUENCY;
+            if self.audio_idx < self.audio_buffer.len() as u16 {
+                self.audio_buffer[self.audio_idx as usize] =
+                    if self.ear_state() { 0.2 } else { 0.0 };
+                self.audio_idx += 1;
+            }
+        }
+    }
+
+    pub fn consume_audio(&mut self) -> &[f32] {
+        let idx = self.audio_idx as usize;
+        self.audio_idx = 0;
+        &self.audio_buffer[0..idx]
     }
 }
 
@@ -67,7 +93,7 @@ impl Bus for Spectrum {
         }
 
         keyboard_state |= 0xA0;
-        keyboard_state |= ((self.ear ^ self.tape_player.borrow().ear()) as u8) << 6;
+        keyboard_state |= (self.ear_state() as u8) << 6;
 
         keyboard_state
     }
@@ -85,6 +111,8 @@ impl Bus for Spectrum {
 
 #[cfg(test)]
 mod tests {
+    use crate::SpectrumKey;
+
     use super::*;
 
     /// Build a 16KB ROM filled with a recognisable repeating pattern.
@@ -549,193 +577,6 @@ mod tests {
         assert_eq!(mem.port_read(0xFEFE), 0xFF);
     }
 
-    // // -----------------------------------------------------------------
-    // // Port 0xFE — IN (Single key presses per row)
-    // // -----------------------------------------------------------------
-
-    // #[test]
-    // fn port_fe_read_row_0_bit_0_cleared() {
-    //     let mut mem = make_spectrum16k();
-    //     mem.set_keyboard_row(0, 0b11110);
-    //     assert_eq!(mem.port_read(0xFEFE) & 0x1F, 0b11110);
-    // }
-
-    // #[test]
-    // fn port_fe_read_row_0_bit_1_cleared() {
-    //     let mut mem = make_spectrum16k();
-    //     mem.set_keyboard_row(0, 0b11101);
-    //     assert_eq!(mem.port_read(0xFEFE) & 0x1F, 0b11101);
-    // }
-
-    // #[test]
-    // fn port_fe_read_row_0_bit_4_cleared() {
-    //     let mut mem = make_spectrum16k();
-    //     mem.set_keyboard_row(0, 0b01111);
-    //     assert_eq!(mem.port_read(0xFEFE) & 0x1F, 0b01111);
-    // }
-
-    // #[test]
-    // fn port_fe_read_row_1_single_key() {
-    //     let mut mem = make_spectrum16k();
-    //     mem.set_keyboard_row(1, 0b11011);
-    //     assert_eq!(mem.port_read(0xFDFE) & 0x1F, 0b11011);
-    // }
-
-    // #[test]
-    // fn port_fe_read_row_2_single_key() {
-    //     let mut mem = make_spectrum16k();
-    //     mem.set_keyboard_row(2, 0b10111);
-    //     assert_eq!(mem.port_read(0xFBFE) & 0x1F, 0b10111);
-    // }
-
-    // #[test]
-    // fn port_fe_read_row_3_single_key() {
-    //     let mut mem = make_spectrum16k();
-    //     mem.set_keyboard_row(3, 0b01111);
-    //     assert_eq!(mem.port_read(0xF7FE) & 0x1F, 0b01111);
-    // }
-
-    // #[test]
-    // fn port_fe_read_row_4_single_key() {
-    //     let mut mem = make_spectrum16k();
-    //     mem.set_keyboard_row(4, 0b11110);
-    //     assert_eq!(mem.port_read(0xEFFE) & 0x1F, 0b11110);
-    // }
-
-    // #[test]
-    // fn port_fe_read_row_5_single_key() {
-    //     let mut mem = make_spectrum16k();
-    //     mem.set_keyboard_row(5, 0b11101);
-    //     assert_eq!(mem.port_read(0xDFFE) & 0x1F, 0b11101);
-    // }
-
-    // #[test]
-    // fn port_fe_read_row_6_single_key() {
-    //     let mut mem = make_spectrum16k();
-    //     mem.set_keyboard_row(6, 0b11011);
-    //     assert_eq!(mem.port_read(0xBFFE) & 0x1F, 0b11011);
-    // }
-
-    // #[test]
-    // fn port_fe_read_row_7_single_key() {
-    //     let mut mem = make_spectrum16k();
-    //     mem.set_keyboard_row(7, 0b10111);
-    //     assert_eq!(mem.port_read(0x7FFE) & 0x1F, 0b10111);
-    // }
-
-    // // -----------------------------------------------------------------
-    // // Port 0xFE — IN (Multiple keys in same row)
-    // // -----------------------------------------------------------------
-
-    // #[test]
-    // fn port_fe_read_two_keys_same_row() {
-    //     let mut mem = make_spectrum16k();
-    //     mem.set_keyboard_row(0, 0b11000); // bits 0 and 1 cleared
-    //     assert_eq!(mem.port_read(0xFEFE) & 0x1F, 0b11000);
-    // }
-
-    // #[test]
-    // fn port_fe_read_three_keys_same_row() {
-    //     let mut mem = make_spectrum16k();
-    //     mem.set_keyboard_row(1, 0b10000); // bits 0, 1, 2 cleared
-    //     assert_eq!(mem.port_read(0xFDFE) & 0x1F, 0b10000);
-    // }
-
-    // #[test]
-    // fn port_fe_read_all_keys_in_row_pressed() {
-    //     let mut mem = make_spectrum16k();
-    //     mem.set_keyboard_row(0, 0b00000);
-    //     assert_eq!(mem.port_read(0xFEFE) & 0x1F, 0b00000);
-    // }
-
-    // // -----------------------------------------------------------------
-    // // Port 0xFE — IN (Row independence)
-    // // -----------------------------------------------------------------
-
-    // #[test]
-    // fn port_fe_read_rows_are_independent() {
-    //     let mut mem = make_spectrum16k();
-    //     mem.set_keyboard_row(0, 0b00000); // All keys pressed in row 0
-    //     mem.set_keyboard_row(1, 0b11111); // No keys pressed in row 1
-
-    //     assert_eq!(mem.port_read(0xFEFE) & 0x1F, 0b00000);
-    //     assert_eq!(mem.port_read(0xFDFE) & 0x1F, 0b11111);
-    // }
-
-    // #[test]
-    // fn port_fe_read_modifying_one_row_does_not_affect_other() {
-    //     let mut mem = make_spectrum16k();
-    //     mem.set_keyboard_row(0, 0b11110);
-    //     mem.set_keyboard_row(1, 0b11101);
-
-    //     assert_eq!(mem.port_read(0xFEFE) & 0x1F, 0b11110);
-
-    //     mem.set_keyboard_row(0, 0b01111); // Change row 0
-    //     assert_eq!(mem.port_read(0xFEFE) & 0x1F, 0b01111);
-    //     assert_eq!(mem.port_read(0xFDFE) & 0x1F, 0b11101); // Row 1 unchanged
-    // }
-
-    // // -----------------------------------------------------------------
-    // // Port 0xFE — IN (Multiple row selection / AND behavior)
-    // // -----------------------------------------------------------------
-
-    // #[test]
-    // fn port_fe_read_two_rows_are_anded() {
-    //     let mut mem = make_spectrum16k();
-    //     // Row 0: bit 0 pressed -> 0b11110
-    //     // Row 1: bit 1 pressed -> 0b11101
-    //     // AND: 0b11110 & 0b11101 = 0b11100
-    //     mem.set_keyboard_row(0, 0b11110);
-    //     mem.set_keyboard_row(1, 0b11101);
-
-    //     // Port 0xFCFE: high byte 0xFC = 11111100, bits 0 and 1 low -> rows 0 and 1
-    //     assert_eq!(mem.port_read(0xFCFE) & 0x1F, 0b11100);
-    // }
-
-    // #[test]
-    // fn port_fe_read_anded_rows_show_combined_pressed_keys() {
-    //     let mut mem = make_spectrum16k();
-    //     // Row 0: bits 0,1 pressed -> 0b11100
-    //     // Row 1: bits 2,3 pressed -> 0b10011
-    //     // AND: 0b11100 & 0b10011 = 0b10000
-    //     mem.set_keyboard_row(0, 0b11100);
-    //     mem.set_keyboard_row(1, 0b10011);
-
-    //     assert_eq!(mem.port_read(0xFCFE) & 0x1F, 0b10000);
-    // }
-
-    // #[test]
-    // fn port_fe_read_all_eight_rows_anded_no_keys() {
-    //     let mem = make_spectrum16k();
-    //     // All rows have no keys pressed (0b11111)
-    //     // Port 0x00FE: high byte 0x00, all bits low -> all rows selected
-    //     assert_eq!(mem.port_read(0x00FE) & 0x1F, 0b11111);
-    // }
-
-    // #[test]
-    // fn port_fe_read_all_eight_rows_anded_with_keys() {
-    //     let mut mem = make_spectrum16k();
-    //     // Each row has a different bit pressed
-    //     for row in 0..8u8 {
-    //         let pressed_bit = 1 << row; // Row 0 -> bit 0, row 1 -> bit 1, etc.
-    //         mem.set_keyboard_row(row, !(pressed_bit & 0x1F) & 0x1F);
-    //     }
-    //     // AND of all rows: each row has a different bit cleared, so AND clears all bits
-    //     assert_eq!(mem.port_read(0x00FE) & 0x1F, 0b00000);
-    // }
-
-    // #[test]
-    // fn port_fe_read_three_rows_anded() {
-    //     let mut mem = make_spectrum16k();
-    //     mem.set_keyboard_row(0, 0b11110); // bit 0 pressed
-    //     mem.set_keyboard_row(1, 0b11111); // no keys
-    //     mem.set_keyboard_row(2, 0b11101); // bit 1 pressed
-
-    //     // Port 0xF8FE: high byte 0xF8 = 11111000, bits 0,1,2 low -> rows 0,1,2
-    //     // AND: 0b11110 & 0b11111 & 0b11101 = 0b11100
-    //     assert_eq!(mem.port_read(0xF8FE) & 0x1F, 0b11100);
-    // }
-
     // -----------------------------------------------------------------
     // Port 0xFE — IN (EAR bit 6 — Issue 3 default)
     // -----------------------------------------------------------------
@@ -797,16 +638,18 @@ mod tests {
         assert_eq!(mem.port_read(0xFEFE) & 0x40, 0);
     }
 
-    // #[test]
-    // fn port_fe_read_ear_bit_6_independent_of_keyboard() {
-    //     let mut mem = make_spectrum16k();
-    //     mem.set_keyboard_row(0, 0b00000); // All keys pressed
-    //     mem.port_write(0xFE, 0x10); // EAR high
+    #[test]
+    fn port_fe_read_ear_bit_6_independent_of_keyboard() {
+        let mut mem = make_spectrum16k();
+        SpectrumKey::ALL_KEYS
+            .iter()
+            .for_each(|k| mem.keyboard.borrow_mut().press_key(k));
+        mem.port_write(0xFE, 0x10); // EAR high
 
-    //     let result = mem.port_read(0xFEFE);
-    //     assert_ne!(result & 0x40, 0); // EAR bit still set
-    //     assert_eq!(result & 0x1F, 0b00000); // Keyboard still works
-    // }
+        let result = mem.port_read(0xFEFE);
+        assert_ne!(result & 0x40, 0); // EAR bit still set
+        assert_eq!(result & 0x1F, 0b00000); // Keyboard still works
+    }
 
     // -----------------------------------------------------------------
     // Floating bus (odd port reads)
@@ -879,30 +722,15 @@ mod tests {
         }
     }
 
-    // #[test]
-    // fn port_read_all_standard_keyboard_ports() {
-    //     let mut mem = make_spectrum16k();
-    //     let ports = [
-    //         0xFEFE, 0xFDFE, 0xFBFE, 0xF7FE, 0xEFFE, 0xDFFE, 0xBFFE, 0x7FFE,
-    //     ];
-
-    //     for (row, &port) in ports.iter().enumerate() {
-    //         mem.set_keyboard_row(row as u8, 0b01111);
-    //         assert_eq!(
-    //             mem.port_read(port) & 0x1F,
-    //             0b01111,
-    //             "Row {row} at port {port:#06X} failed"
-    //         );
-    //     }
-    // }
-
-    // #[test]
-    // fn port_write_does_not_affect_keyboard_state() {
-    //     let mut mem = make_spectrum16k();
-    //     mem.set_keyboard_row(0, 0b11110);
-    //     mem.port_write(0xFE, 0xFF);
-    //     assert_eq!(mem.port_read(0xFEFE) & 0x1F, 0b11110);
-    // }
+    #[test]
+    fn port_write_does_not_affect_keyboard_state() {
+        let mut mem: Spectrum = make_spectrum16k();
+        mem.keyboard
+            .borrow_mut()
+            .press_key(&crate::SpectrumKey::CapsShift);
+        mem.port_write(0xFE, 0xFF);
+        assert_eq!(mem.port_read(0xFEFE) & 0x1F, 0b11110);
+    }
 
     #[test]
     fn port_read_does_not_affect_ula_state() {
@@ -910,5 +738,61 @@ mod tests {
         mem.port_write(0xFE, 0x05);
         let _ = mem.port_read(0xFEFE);
         assert_eq!(mem.border_color(), 5);
+    }
+
+    // -----------------------------------------------------------------
+    // Audio Generation Tests
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_audio_generation_exact_rate() {
+        let mut mem = make_spectrum16k();
+
+        // 3.5 MHz CPU for exactly 1 second
+        // At exactly 48,000Hz, we should produce EXACTLY 48,000 samples.
+        let mut total_samples = 0;
+        let chunk_size = 1000;
+
+        for _ in 0..(3_500_000 / chunk_size) {
+            mem.step(chunk_size);
+            total_samples += mem.consume_audio().len();
+        }
+
+        assert_eq!(
+            total_samples, 48_000,
+            "Audio generation drifted! Produced {} instead of exactly 48000 samples.",
+            total_samples
+        );
+    }
+
+    #[test]
+    fn test_audio_buffer_overflow_prevention() {
+        let mut mem = make_spectrum16k();
+
+        // Simulating a massive frame skip/stall (e.g., stepping 200,000 cycles at once)
+        mem.step(200_000);
+
+        let samples = mem.consume_audio();
+        assert!(
+            samples.len() <= 2000,
+            "Audio buffer should cap safely without panicking, got len: {}",
+            samples.len()
+        );
+    }
+
+    #[test]
+    fn test_audio_amplitude_on_ear_toggle() {
+        let mut mem = make_spectrum16k();
+
+        // Default state (EAR off)
+        mem.step(100); // Step enough for at least 1 sample
+        let samples = mem.consume_audio();
+        assert_eq!(samples[0], 0.0, "EAR default should output 0.0");
+
+        // Toggle EAR on via port 0xFE
+        mem.port_write(0xFE, 0x10);
+        mem.step(100);
+        let samples_on = mem.consume_audio();
+        assert_eq!(samples_on[0], 0.2, "EAR active should output 0.2");
     }
 }

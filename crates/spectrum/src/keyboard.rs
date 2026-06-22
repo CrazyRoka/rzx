@@ -109,7 +109,7 @@ impl SpectrumKey {
         SpectrumKey::N,
         SpectrumKey::B,
     ];
-    const ALL_KEYS: [SpectrumKey; 40] = {
+    pub const ALL_KEYS: [SpectrumKey; 40] = {
         let mut flat = [SpectrumKey::CapsShift; 40];
 
         let matrix = [
