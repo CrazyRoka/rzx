@@ -1,6 +1,5 @@
+use crate::Spectrum;
 use z80::Bus;
-
-use crate::Spectrum16k;
 
 const BORDER_TOP: usize = 48;
 const BORDER_BOTTOM: usize = 56;
@@ -81,7 +80,7 @@ impl ULA {
         }
     }
 
-    pub fn render(&mut self, buffer: &mut [u32], cycles: u64, bus: &Spectrum16k) -> bool {
+    pub fn render(&mut self, buffer: &mut [u32], cycles: u64, bus: &Spectrum) -> bool {
         self.cycles += cycles;
         if self.cycles < CYCLES_PER_FRAME as u64 {
             return false;

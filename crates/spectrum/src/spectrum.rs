@@ -2,11 +2,10 @@ use std::{cell::RefCell, rc::Rc};
 
 use z80::Bus;
 
-use crate::{Keyboard, TapePlayer};
+use crate::{Keyboard, TapePlayer, memory::SpectrumMemory};
 
-pub struct Spectrum16k {
-    rom: [u8; 0x4000], // 0x0000 – 0x3FFF
-    ram: [u8; 0x4000], // 0x4000 - 0x7FFF
+pub struct Spectrum {
+    memory: SpectrumMemory,
     //IO
     keyboard: Rc<RefCell<Keyboard>>,
     tape_player: Rc<RefCell<TapePlayer>>,
@@ -16,19 +15,14 @@ pub struct Spectrum16k {
     ear: bool,
 }
 
-impl Spectrum16k {
+impl Spectrum {
     pub fn new(
-        rom: &[u8],
+        memory: SpectrumMemory,
         keyboard: Rc<RefCell<Keyboard>>,
         tape_player: Rc<RefCell<TapePlayer>>,
     ) -> Self {
-        assert_eq!(rom.len(), 0x4000, "16K model requires a 16KB ROM");
-        let mut rom_clone = [0; 0x4000];
-        rom_clone.copy_from_slice(rom);
-
-        Spectrum16k {
-            rom: rom_clone,
-            ram: [0xFF; 0x4000],
+        Self {
+            memory,
             keyboard,
             tape_player,
             border_color: 0,
@@ -50,37 +44,17 @@ impl Spectrum16k {
     }
 }
 
-impl Bus for Spectrum16k {
+impl Bus for Spectrum {
     fn read(&self, addr: u16) -> u8 {
-        match addr {
-            0x0000..=0x3FFF => self.rom[addr as usize],
-            0x4000..=0x7FFF => self.ram[(addr & 0x3FFF) as usize],
-            0x8000..=0xFFFF => {
-                // dbg!("Attempt to read upper RAM area on 16K model", addr);
-                0xFF
-            }
-        }
+        self.memory.read(addr)
     }
 
     fn write(&mut self, addr: u16, value: u8) {
-        match addr {
-            0x0000..=0x3FFF => {
-                // dbg!("Attempt to overwrite ROM area", addr, value);
-            }
-            0x4000..=0x7FFF => self.ram[(addr & 0x3FFF) as usize] = value,
-            0x8000..=0xFFFF => {
-                // dbg!(
-                //     "Attempt to overwrite upper RAM area on 16K model",
-                //     addr,
-                //     value
-                // );
-            }
-        }
+        self.memory.write(addr, value);
     }
 
     fn port_read(&self, port: u16) -> u8 {
         if (port & 0xFF) != 0xFE {
-            // dbg!("Unexpectede port read at address {port:#04X}");
             // TODO: handle floating bus
             return 0xFF;
         }
@@ -100,26 +74,12 @@ impl Bus for Spectrum16k {
 
     fn port_write(&mut self, port: u16, value: u8) {
         if (port & 0x01) == 1 {
-            // dbg!("Unexpected even port write", port, value);
             return;
         }
 
         self.border_color = value & 0x07;
         self.mic = (value & 0x08) == 0x08;
         self.ear = (value & 0x10) == 0x10;
-
-        // dbg!(
-        //     "Received port write",
-        //     self.border_color,
-        //     self.mic,
-        //     self.ear,
-        //     port,
-        //     value
-        // );
-
-        // if (port & 0xFF) != 0xFE {
-        //     dbg!("Received unexpected port write", port, value);
-        // }
     }
 }
 
@@ -152,30 +112,14 @@ mod tests {
         Rc::new(RefCell::new(TapePlayer::from_tape(&block)))
     }
 
-    fn make_spectrum16k() -> Spectrum16k {
-        Spectrum16k::new(&make_rom(), make_keyboard(), make_tape())
+    fn make_spectrum16k() -> Spectrum {
+        let memory = SpectrumMemory::new_16k(&make_rom());
+        Spectrum::new(memory, make_keyboard(), make_tape())
     }
 
-    // -----------------------------------------------------------------
-    // Construction / validation
-    // -----------------------------------------------------------------
-
-    #[test]
-    fn new_accepts_exactly_16kb_rom() {
-        // Should not panic
-        let _mem = Spectrum16k::new(&[0u8; 0x4000], make_keyboard(), make_tape());
-    }
-
-    #[test]
-    #[should_panic(expected = "16K model requires a 16KB ROM")]
-    fn new_rejects_rom_shorter_than_16kb() {
-        let _mem = Spectrum16k::new(&[0u8; 0x3FFF], make_keyboard(), make_tape());
-    }
-
-    #[test]
-    #[should_panic(expected = "16K model requires a 16KB ROM")]
-    fn new_rejects_rom_longer_than_16kb() {
-        let _mem = Spectrum16k::new(&[0u8; 0x4001], make_keyboard(), make_tape());
+    fn make_spectrum48k() -> Spectrum {
+        let memory = SpectrumMemory::new_48k(&make_rom());
+        Spectrum::new(memory, make_keyboard(), make_tape())
     }
 
     // -----------------------------------------------------------------
@@ -288,7 +232,7 @@ mod tests {
     // -----------------------------------------------------------------
 
     #[test]
-    fn unmapped_read_returns_0xff() {
+    fn test_16k_unmapped_read_returns_0xff() {
         let mem = make_spectrum16k();
         assert_eq!(mem.read(0x8000), 0xFF);
         assert_eq!(mem.read(0xC000), 0xFF);
@@ -296,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn unmapped_write_does_not_crash_and_is_ignored() {
+    fn test_16k_unmapped_write_does_not_crash_and_is_ignored() {
         let mut mem = make_spectrum16k();
         // Should not panic
         mem.write(0x8000, 0x42);
@@ -306,6 +250,35 @@ mod tests {
         assert_eq!(mem.read(0x8000), 0xFF);
         assert_eq!(mem.read(0xC000), 0xFF);
         assert_eq!(mem.read(0xFFFF), 0xFF);
+    }
+
+    // -----------------------------------------------------------------
+    // 48k Model Upper RAM (0x8000 ..= 0xFFFF)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_48k_upper_banks_are_valid_ram() {
+        let mut mem = make_spectrum48k();
+
+        // 0x8000..=0xFFFF should behave like standard RAM
+        assert_eq!(mem.read(0x8000), 0xFF);
+        assert_eq!(mem.read(0xFFFF), 0xFF);
+
+        mem.write(0x8000, 0x55);
+        mem.write(0xFFFF, 0xAA);
+        assert_eq!(mem.read(0x8000), 0x55);
+        assert_eq!(mem.read(0xFFFF), 0xAA);
+    }
+
+    #[test]
+    fn test_48k_full_ram_range_independent() {
+        let mut mem = make_spectrum48k();
+        mem.write(0x4000, 0x11);
+        mem.write(0x8000, 0x22);
+        mem.write(0xC000, 0x33);
+        assert_eq!(mem.read(0x4000), 0x11);
+        assert_eq!(mem.read(0x8000), 0x22);
+        assert_eq!(mem.read(0xC000), 0x33);
     }
 
     // -----------------------------------------------------------------
