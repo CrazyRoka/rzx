@@ -1,5 +1,3 @@
-use std::{cell::RefCell, env::args, fs, io::Error, process::exit, rc::Rc, time::Instant};
-
 use cpal::{
     BufferSize, OutputCallbackInfo, StreamConfig,
     traits::{DeviceTrait, HostTrait, StreamTrait},
@@ -13,28 +11,28 @@ use spectrum::{
     AUDIO_RATE, Keyboard, Spectrum, SpectrumKey, SpectrumMemory, TapePlayer, ULA, WINDOW_HEIGHT,
     WINDOW_WIDTH,
 };
+use std::{cell::RefCell, env::args, fs, io::Error, process::exit, rc::Rc, time::Instant};
 use z80::Z80;
 
+const ROM_BYTES_48K_MODEL: &[u8] = include_bytes!("../../../roms/boot-16k-48k.rom");
+
 fn main() -> Result<(), Error> {
-    if args().len() != 4 {
-        eprintln!("Expected model, ROM path and TAP path as argument.");
+    if args().len() != 3 {
+        eprintln!("Expected model and TAP path as argument.");
         exit(-1);
     }
 
     let model_name = args().nth(1).expect("Argument should be present");
-    let rom_path = args().nth(2).expect("Argument should be present");
-    println!("Loading ROM from path: {}", rom_path);
-    let rom_bytes = fs::read(rom_path)?;
     let memory = match model_name.as_str() {
-        "16k" => SpectrumMemory::new_16k(&rom_bytes),
-        "48k" => SpectrumMemory::new_48k(&rom_bytes),
+        "16k" => SpectrumMemory::new_16k(ROM_BYTES_48K_MODEL),
+        "48k" => SpectrumMemory::new_48k(ROM_BYTES_48K_MODEL),
         _ => {
             eprintln!("Expected model 48k or 16k, found <{model_name}>");
             exit(-1);
         }
     };
 
-    let tap_path = args().nth(3).expect("Argument should be present");
+    let tap_path = args().nth(2).expect("Argument should be present");
     println!("Loading TAP from path: {}", tap_path);
     let tap_bytes = fs::read(tap_path)?;
     let tape_player = Rc::new(RefCell::new(TapePlayer::from_tape(&tap_bytes)));
