@@ -36,26 +36,26 @@ impl Color {
 
     fn get_normal_color(&self) -> u32 {
         match self {
-            Color::Black => 0xFF000000,
-            Color::Blue => 0xFF0000CD,
-            Color::Red => 0xFFCD0000,
-            Color::Magenta => 0xFFCD00CD,
-            Color::Green => 0xFF00CD00,
-            Color::Cyan => 0xFF00CDCD,
-            Color::Yellow => 0xFFCDCD00,
-            Color::White => 0xFFCDCDCD,
+            Color::Black => 0x000000FF,
+            Color::Blue => 0x0000CDFF,
+            Color::Red => 0xCD0000FF,
+            Color::Magenta => 0xCD00CDFF,
+            Color::Green => 0x00CD00FF,
+            Color::Cyan => 0x00CDCDFF,
+            Color::Yellow => 0xCDCD00FF,
+            Color::White => 0xCDCDCDFF,
         }
     }
 
     fn get_bright_color(&self) -> u32 {
         match self {
-            Color::Black => 0xFF000000,
-            Color::Blue => 0xFF0000FF,
-            Color::Red => 0xFFFF0000,
-            Color::Magenta => 0xFFFF00FF,
-            Color::Green => 0xFF00FF00,
-            Color::Cyan => 0xFF00FFFF,
-            Color::Yellow => 0xFFFFFF00,
+            Color::Black => 0x000000FF,
+            Color::Blue => 0x0000FFFF,
+            Color::Red => 0xFF0000FF,
+            Color::Magenta => 0xFF00FFFF,
+            Color::Green => 0x00FF00FF,
+            Color::Cyan => 0x00FFFFFF,
+            Color::Yellow => 0xFFFF00FF,
             Color::White => 0xFFFFFFFF,
         }
     }
